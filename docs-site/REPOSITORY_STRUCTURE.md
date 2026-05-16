@@ -1,6 +1,6 @@
 # CMBS Repository Structure
 
-This document describes the layout of the CMBS (Constraint-Mask Belief System) repository.
+This document describes the layout of the CMBS (Constraint Mask Belief System) repository.
 
 ## Overview
 

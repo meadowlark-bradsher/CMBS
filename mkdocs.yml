@@ -1,5 +1,5 @@
 site_name: CMBS
-site_description: Constraint-Mask Belief System documentation
+site_description: Constraint Mask Belief System documentation
 docs_dir: docs-site
 theme:
   name: mkdocs

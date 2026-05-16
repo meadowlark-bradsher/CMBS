@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cmbs"
+version = "0.1.0"
+description = "Constraint Mask Belief System — externalized belief-state accounting for long-horizon agents."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Meadowlark Bradsher" },
+]
+keywords = [
+    "belief-state",
+    "agents",
+    "hypothesis-elimination",
+    "audit",
+    "replay",
+    "cmbs",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "fastapi>=0.110",
+    "pydantic>=2.0",
+    "uvicorn>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+]
+
+[tool.setuptools.packages.find]
+include = ["cmbs*"]
+exclude = ["tests*", "examples*", "archive*", "docs*", "docs-site*", "docs-vault*", "docs-snapshots*"]
+
+[tool.setuptools.package-data]
+cmbs = ["adapters/*/kits/*.yaml"]

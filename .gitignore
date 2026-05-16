@@ -46,3 +46,14 @@ Thumbs.db
 
 # Docs build output
 site/
+
+# Pending review for deletion before open-source release.
+# See REVIEW_FOR_DELETION.md (also gitignored) for the rationale on each entry.
+# Files remain on local disk; this only stops them from being tracked/shipped.
+archive/
+docs-snapshots/
+docs-vault/.obsidian/
+docs-vault/comms/
+docs-vault/BACKLOG.md
+MARKDOWN_INDEX.md
+REVIEW_FOR_DELETION.md

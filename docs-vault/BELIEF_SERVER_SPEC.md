@@ -121,7 +121,7 @@ Request:
 ```yaml
 ELIMINATE:
   session_id: uuid
-  source_id: string            # e.g. "adapter://sre", "oracle://20q", "human://meadowlark"
+  source_id: string            # e.g. "adapter://sre", "oracle://20q", "human://alice"
   observation_id: string       # caller-defined id for traceability
   eliminated: [string]         # hypotheses claimed inconsistent
   justification: object        # opaque to server (stored, not interpreted)

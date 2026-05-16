@@ -1,6 +1,6 @@
-# CMBS v0 Core
+# CMBS — Constraint Mask Belief System
 
-CMBS is a belief-state accounting system. It tracks hypotheses, eliminations, entropy, and obligation discipline using opaque identifiers. The core is domain-agnostic and replay-auditable.
+CMBS (Constraint Mask Belief System) is a belief-state accounting library. It tracks hypotheses, eliminations, entropy, and obligation discipline using opaque identifiers. The core is domain-agnostic and replay-auditable.
 
 ## Why CMBS Exists
 
@@ -54,7 +54,6 @@ adapter.submit_elimination_event(
 
 ## Docs
 
-- [Markdown Index](MARKDOWN_INDEX.md) - single entry point for all Markdown in this repo
 - [Docs Site Home](docs-site/index.md) - MkDocs landing page
 - [Repository Structure](docs-site/REPOSITORY_STRUCTURE.md) - package and folder map
 - [CMBS Architecture](docs-vault/ARCHITECTURE.md)
