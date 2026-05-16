@@ -5,6 +5,7 @@ theme:
   name: mkdocs
 nav:
   - Home: index.md
+  - Use Cases: use-cases.md
   - Architecture: architecture.md
   - Reference:
       - API: reference/api.md
