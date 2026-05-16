@@ -47,13 +47,13 @@ Thumbs.db
 # Docs build output
 site/
 
-# Pending review for deletion before open-source release.
-# See REVIEW_FOR_DELETION.md (also gitignored) for the rationale on each entry.
-# Files remain on local disk; this only stops them from being tracked/shipped.
+# Private artifact archives — original agent prompts, scratch notes, research
+# jottings. Kept on local disk for archaeology / "why did the code diverge from
+# the spec?" lookups, but not shipped with the public repo.
+# See REVIEW_FOR_DELETION.md (also gitignored) for what's in each.
 archive/
 docs-snapshots/
-docs-vault/.obsidian/
-docs-vault/comms/
-docs-vault/BACKLOG.md
+docs-vault/
+docs-site/
 MARKDOWN_INDEX.md
 REVIEW_FOR_DELETION.md

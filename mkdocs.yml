@@ -1,11 +1,15 @@
 site_name: CMBS
 site_description: Constraint Mask Belief System documentation
-docs_dir: docs-site
+docs_dir: docs
 theme:
   name: mkdocs
 nav:
   - Home: index.md
-  - Repository Structure: REPOSITORY_STRUCTURE.md
+  - Architecture: architecture.md
+  - Reference:
+      - API: reference/api.md
+      - Repository Layout: reference/repository.md
+      - Invariant Test Matrix: reference/invariant-test-matrix.md
 markdown_extensions:
   - toc:
       permalink: true
