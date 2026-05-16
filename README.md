@@ -54,10 +54,11 @@ adapter.submit_elimination_event(
 
 ## Docs
 
-- [Docs Site Home](docs-site/index.md) - MkDocs landing page
-- [Repository Structure](docs-site/REPOSITORY_STRUCTURE.md) - package and folder map
-- [CMBS Architecture](docs-vault/ARCHITECTURE.md)
-- [v0 Test Specification](docs-vault/v0-test-specification.md)
-- [v0 Implementation Summary](docs-vault/v0-implementation-summary.md)
-- [v0 Core Contract Validation](docs-vault/v0-core-contract-validation.md)
-- [Legacy Archive Notes](docs-vault/ARCHIVE.md)
+- [Home](docs/index.md) — install, quickstart, and pointers
+- [Architecture](docs/architecture.md) — mechanism vs policy, invariants, layers
+- [API Reference](docs/reference/api.md) — public surface
+- [Repository Layout](docs/reference/repository.md) — what lives where
+- [Invariant Test Matrix](docs/reference/invariant-test-matrix.md) — what's tested
+
+Published at <https://meadowlark-bradsher.github.io/CMBS/> via mkdocs (CI in
+`.github/workflows/deploy-pages.yml`).
