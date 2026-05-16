@@ -38,6 +38,7 @@ of those live in adapters; the kernel only books the consequences.
 
 ## Next steps
 
+- [Use Cases](use-cases.md) — when CMBS fits, including LLM context management
 - [Architecture](architecture.md) — mechanism vs policy, invariants, layers
 - [API Reference](reference/api.md) — the public surface
 - [Repository Layout](reference/repository.md) — what lives where
