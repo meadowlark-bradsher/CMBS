@@ -6,7 +6,7 @@ and auditable, and where ad-hoc tracking (in prompts, hidden state, scattered
 logs) starts to break down. This page walks through where CMBS fits, with
 worked patterns.
 
-## Hero use case: context management for long-horizon LLM agents
+## Context management for long-horizon LLM agents
 
 The problem with long-horizon LLM agents is that "what we already know" tends
 to live inside the prompt. After 50 tool calls, the conversation history is

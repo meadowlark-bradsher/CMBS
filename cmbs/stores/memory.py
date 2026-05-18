@@ -4,8 +4,6 @@ In-memory elimination store.
 
 from __future__ import annotations
 
-from typing import Dict, FrozenSet, Set
-
 from ..spi.elimination_store import (
     EliminationProvenance,
     EliminationResult,
@@ -15,10 +13,10 @@ from ..spi.elimination_store import (
 
 class InMemoryStore:
     def __init__(self) -> None:
-        self._universes: Dict[str, FrozenSet[str]] = {}
-        self._tombstones: Dict[str, Set[str]] = {}
+        self._universes: dict[str, frozenset[str]] = {}
+        self._tombstones: dict[str, set[str]] = {}
 
-    def create_session(self, session_id: str, hypothesis_ids: FrozenSet[str]) -> None:
+    def create_session(self, session_id: str, hypothesis_ids: frozenset[str]) -> None:
         if session_id in self._universes:
             raise ValueError(f"Session '{session_id}' already exists.")
         self._universes[session_id] = frozenset(hypothesis_ids)
@@ -27,7 +25,7 @@ class InMemoryStore:
     def eliminate(
         self,
         session_id: str,
-        eliminated: Set[str],
+        eliminated: set[str],
         provenance: EliminationProvenance,
     ) -> EliminationResult:
         self._require_session(session_id)
@@ -40,13 +38,13 @@ class InMemoryStore:
             already_eliminated=frozenset(already),
         )
 
-    def get_survivors(self, session_id: str) -> FrozenSet[str]:
+    def get_survivors(self, session_id: str) -> frozenset[str]:
         self._require_session(session_id)
         return frozenset(
             self._universes[session_id] - self._tombstones[session_id]
         )
 
-    def get_eliminated(self, session_id: str) -> FrozenSet[str]:
+    def get_eliminated(self, session_id: str) -> frozenset[str]:
         self._require_session(session_id)
         return frozenset(self._tombstones[session_id])
 

@@ -1,4 +1,5 @@
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from cmbs.belief_server import BeliefServer, OntologyBundle
 

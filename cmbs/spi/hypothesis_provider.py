@@ -4,7 +4,8 @@ SPI interface for hypothesis providers.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Protocol
+from collections.abc import Iterable, Mapping
+from typing import Any, Protocol
 
 
 class HypothesisProvider(Protocol):

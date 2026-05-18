@@ -5,12 +5,11 @@ SPI discovery for hypothesis providers.
 from __future__ import annotations
 
 from importlib import metadata
-from typing import Dict, Type
 
 from .hypothesis_provider import HypothesisProvider
 
 
-def discover_providers() -> Dict[str, Type[HypothesisProvider]]:
+def discover_providers() -> dict[str, type[HypothesisProvider]]:
     try:
         eps = metadata.entry_points()
     except Exception:

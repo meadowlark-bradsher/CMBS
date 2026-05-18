@@ -1,7 +1,7 @@
 """Tests for the legacy replay adapter shim."""
 
-from cmbs.core import CMBSCore
 from cmbs.adapters.legacy import LegacyEliminationEvent, LegacyReplayAdapter
+from cmbs.core import CMBSCore
 
 
 def test_legacy_adapter_submits_elimination_event():

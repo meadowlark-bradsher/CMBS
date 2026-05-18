@@ -1,9 +1,9 @@
+from cmbs.adapters.twenty_questions import TwentyQAdapter, TwentyQOracle, load_builtin_kit
 from cmbs.belief_server import BeliefServer, OntologyBundle
-from cmbs.adapters.twenty_questions import TwentyQAdapter, TwentyQOracle, load_kit
 
 
 def main() -> None:
-    kit = load_kit("cmbs/adapters/twenty_questions/kits/20q_4.yaml")
+    kit = load_builtin_kit("20q_4")
     server = BeliefServer()
     adapter = TwentyQAdapter(kit)
     oracle = TwentyQOracle(kit)

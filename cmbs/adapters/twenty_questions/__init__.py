@@ -1,7 +1,7 @@
 """Twenty Questions reference adapter and oracle."""
 
 from .adapter import TwentyQAdapter
-from .kit import ActionSpec, TwentyQKit, load_kit
+from .kit import ActionSpec, TwentyQKit, load_builtin_kit, load_kit
 from .oracle import TwentyQOracle
 
 __all__ = [
@@ -10,4 +10,5 @@ __all__ = [
     "TwentyQAdapter",
     "TwentyQOracle",
     "load_kit",
+    "load_builtin_kit",
 ]

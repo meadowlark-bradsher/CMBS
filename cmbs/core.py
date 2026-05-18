@@ -6,29 +6,29 @@ Opaque identifiers only, no domain semantics, adapter-provided thresholds.
 """
 
 import math
-from dataclasses import dataclass, field
-from typing import Set, Optional, List, Any, Dict
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
 class ProbeResult:
     """Result of submitting a probe observation."""
     accepted: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class ObligationExitResult:
     """Result of requesting obligation exit."""
     permitted: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class TerminationResult:
     """Result of requesting termination."""
     permitted: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -36,7 +36,7 @@ class EliminationEvent:
     """Record of a single elimination event."""
     probe_id: str
     observable_id: str
-    eliminated: Set[str]
+    eliminated: set[str]
 
 
 class CMBSCore:
@@ -50,7 +50,7 @@ class CMBSCore:
 
     def __init__(
         self,
-        hypothesis_ids: Set[str],
+        hypothesis_ids: set[str],
         stability_window: int = 0,
     ) -> None:
         """
@@ -61,17 +61,17 @@ class CMBSCore:
             stability_window: Number of consecutive identical conclusions required
                               for stability (0 = disabled)
         """
-        self._survivors: Set[str] = set(hypothesis_ids)
-        self._consumed_probes: Set[str] = set()
+        self._survivors: set[str] = set(hypothesis_ids)
+        self._consumed_probes: set[str] = set()
         self._stability_window: int = stability_window
-        self._conclusion_history: List[str] = []
+        self._conclusion_history: list[str] = []
         self._terminated: bool = False
-        self._obligations: Dict[str, int] = {}  # obligation_id -> min_eliminations
-        self._obligation_elimination_counts: Dict[str, int] = {}  # obligation_id -> count
-        self._elimination_history: List[EliminationEvent] = []
+        self._obligations: dict[str, int] = {}  # obligation_id -> min_eliminations
+        self._obligation_elimination_counts: dict[str, int] = {}  # obligation_id -> count
+        self._elimination_history: list[EliminationEvent] = []
 
     @property
-    def survivors(self) -> Set[str]:
+    def survivors(self) -> set[str]:
         """Return the current set of surviving hypothesis IDs."""
         return set(self._survivors)
 
@@ -84,12 +84,12 @@ class CMBSCore:
         return math.log2(n)
 
     @property
-    def consumed_probes(self) -> Set[str]:
+    def consumed_probes(self) -> set[str]:
         """Return the set of probe IDs that have been consumed."""
         return set(self._consumed_probes)
 
     @property
-    def active_obligations(self) -> Set[str]:
+    def active_obligations(self) -> set[str]:
         """Return the set of currently active obligation IDs."""
         return set(self._obligations.keys())
 
@@ -102,7 +102,7 @@ class CMBSCore:
         self,
         probe_id: str,
         observable_id: str,
-        eliminated: Set[str],
+        eliminated: set[str],
     ) -> ProbeResult:
         """
         Submit an observation from a probe.
@@ -239,7 +239,7 @@ class CMBSCore:
         else:
             return TerminationResult(permitted=False)
 
-    def get_elimination_history(self) -> List[EliminationEvent]:
+    def get_elimination_history(self) -> list[EliminationEvent]:
         """
         Return ordered list of elimination events for audit trail.
 

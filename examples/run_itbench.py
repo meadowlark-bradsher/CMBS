@@ -1,9 +1,9 @@
+from cmbs.adapters.itbench import ITBenchAdapter, ITBenchOracle, load_builtin_kit
 from cmbs.belief_server import BeliefServer, OntologyBundle
-from cmbs.adapters.itbench import ITBenchAdapter, ITBenchOracle, load_kit
 
 
 def main() -> None:
-    kit = load_kit("cmbs/adapters/itbench/kits/itb_min_4.yaml")
+    kit = load_builtin_kit("itb_min_4")
     server = BeliefServer()
     adapter = ITBenchAdapter(kit)
 

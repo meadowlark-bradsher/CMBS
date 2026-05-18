@@ -9,11 +9,11 @@ Assumes core API exists and is implemented.
 """
 
 import math
+
 import pytest
 
 # Core API assumed to exist (not yet implemented)
 from cmbs.core import CMBSCore
-
 
 # =============================================================================
 # 1. INVARIANT TESTS

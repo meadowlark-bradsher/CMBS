@@ -4,14 +4,12 @@ Deterministic oracle for Twenty Questions kits.
 
 from __future__ import annotations
 
-from typing import Dict, List
-
 from .kit import TwentyQKit
 
 
 class TwentyQOracle:
     def __init__(self, kit: TwentyQKit):
-        self._keep: Dict[str, Dict[str, List[str]]] = {
+        self._keep: dict[str, dict[str, list[str]]] = {
             action_id: spec.keep for action_id, spec in kit.actions.items()
         }
 

@@ -4,7 +4,7 @@ ITBench adapter.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Set
+from typing import Any
 
 from ..types import Action, AdapterActionContext, BeliefMessage, EliminateMessage
 from .kit import ITBenchKit
@@ -14,10 +14,10 @@ class ITBenchAdapter:
     def __init__(self, kit: ITBenchKit, source_id: str = "adapter://itbench"):
         self._kit = kit
         self._source_id = source_id
-        self._asked: Set[str] = set()
+        self._asked: set[str] = set()
 
-    def list_actions(self, snapshot) -> List[Action]:
-        actions: List[Action] = []
+    def list_actions(self, snapshot) -> list[Action]:
+        actions: list[Action] = []
         survivors = set(snapshot.survivors)
         for action_id in self._kit.actions_order:
             if action_id in self._asked:
@@ -47,7 +47,7 @@ class ITBenchAdapter:
         self,
         action_ctx: AdapterActionContext,
         raw_observation: Any,
-    ) -> List[BeliefMessage]:
+    ) -> list[BeliefMessage]:
         outcome = _normalize_outcome(raw_observation)
         spec = self._kit.actions[action_ctx.action_id]
         if outcome not in spec.outcomes:
@@ -74,8 +74,8 @@ def _normalize_outcome(raw_observation: Any) -> str:
     raise ValueError("ITBenchAdapter expects raw_observation to be a string outcome.")
 
 
-def _is_noop(oracle_table: Dict[str, Dict[str, Dict[str, List[str]]]], action_id: str, survivors: Set[str]) -> bool:
-    for outcome, spec in oracle_table.get(action_id, {}).items():
+def _is_noop(oracle_table: dict[str, dict[str, dict[str, list[str]]]], action_id: str, survivors: set[str]) -> bool:
+    for spec in oracle_table.get(action_id, {}).values():
         if set(spec.get("eliminates", [])) & survivors:
             return False
     return True

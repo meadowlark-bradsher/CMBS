@@ -5,7 +5,7 @@ Shared adapter types.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Protocol
 
 from ..belief_server import BeliefSnapshot
 
@@ -14,14 +14,14 @@ from ..belief_server import BeliefSnapshot
 class Action:
     action_id: str
     prompt: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class AdapterActionContext:
     action_id: str
     snapshot: BeliefSnapshot
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -29,16 +29,16 @@ class EliminateMessage:
     verb: str
     source_id: str
     observation_id: str
-    eliminated: List[str]
-    justification: Dict[str, Any]
+    eliminated: list[str]
+    justification: dict[str, Any]
 
     @staticmethod
     def create(
         source_id: str,
         observation_id: str,
-        eliminated: List[str],
-        justification: Dict[str, Any],
-    ) -> "EliminateMessage":
+        eliminated: list[str],
+        justification: dict[str, Any],
+    ) -> EliminateMessage:
         return EliminateMessage(
             verb="ELIMINATE",
             source_id=source_id,
@@ -52,7 +52,7 @@ BeliefMessage = EliminateMessage
 
 
 class BeliefAdapter(Protocol):
-    def list_actions(self, snapshot: BeliefSnapshot) -> List[Action]:
+    def list_actions(self, snapshot: BeliefSnapshot) -> list[Action]:
         """Return available probes/actions given current belief."""
 
     def apply_action(self, action_id: str, snapshot: BeliefSnapshot) -> AdapterActionContext:
@@ -62,5 +62,5 @@ class BeliefAdapter(Protocol):
         self,
         action_ctx: AdapterActionContext,
         raw_observation: Any,
-    ) -> List[BeliefMessage]:
+    ) -> list[BeliefMessage]:
         """Translate observation into belief-protocol messages."""

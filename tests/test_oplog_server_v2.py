@@ -1,3 +1,5 @@
+import pytest
+
 from cmbs.op_models import OperationSpec
 from cmbs.oplog_server import OplogServer, OplogServerError
 
@@ -216,7 +218,7 @@ def test_v2_merge_non_commutative_returns_conflict_witness():
         ),
     )
 
-    try:
+    with pytest.raises(OplogServerError) as exc_info:
         server.merge(
             sid=sid,
             base_branch="main",
@@ -228,11 +230,10 @@ def test_v2_merge_non_commutative_returns_conflict_witness():
             policy="refuse_non_commutative",
             reducer="v1_mask_meet_tombstone",
         )
-        assert False, "Expected non-commutative merge conflict"
-    except OplogServerError as exc:
-        assert exc.status_code == 409
-        assert exc.code == "NON_COMMUTATIVE_CONFLICT"
-        assert "witness" in (exc.details or {})
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.code == "NON_COMMUTATIVE_CONFLICT"
+    assert "witness" in (exc.details or {})
 
 
 def test_v2_merge_commutative_succeeds():

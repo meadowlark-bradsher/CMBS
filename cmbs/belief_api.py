@@ -1,6 +1,6 @@
 """FastAPI transport for Belief Server v1 and operator-log v2."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
@@ -24,16 +24,16 @@ class OntologyBundleModel(BaseModel):
 
 class DeclareSessionRequest(BaseModel):
     ontology: OntologyBundleModel
-    hypotheses: List[str]
-    metadata: Optional[Dict[str, Any]] = None
+    hypotheses: list[str]
+    metadata: dict[str, Any] | None = None
 
 
 class EliminateRequest(BaseModel):
     source_id: str
     observation_id: str
-    eliminated: List[str]
-    justification: Optional[Dict[str, Any]] = None
-    session_id: Optional[str] = None
+    eliminated: list[str]
+    justification: dict[str, Any] | None = None
+    session_id: str | None = None
 
 
 class EnterObligationRequest(BaseModel):
@@ -42,52 +42,52 @@ class EnterObligationRequest(BaseModel):
 
 
 class RequestExitRequest(BaseModel):
-    context: Optional[Dict[str, Any]] = None
+    context: dict[str, Any] | None = None
 
 
 class DeclareConclusionRequest(BaseModel):
     conclusion_id: str
-    context: Optional[Dict[str, Any]] = None
+    context: dict[str, Any] | None = None
 
 
 class RequestTerminationRequest(BaseModel):
-    context: Optional[Dict[str, Any]] = None
+    context: dict[str, Any] | None = None
 
 
 class V2CreateSessionRequest(BaseModel):
-    ontology: Dict[str, Any]
-    initial_hypotheses: List[str]
+    ontology: dict[str, Any]
+    initial_hypotheses: list[str]
     default_reducer: str = "v1_mask_meet_tombstone"
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
 
 class OpSpecModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    op_id: Optional[str] = None
+    op_id: str | None = None
     op_type: str = Field(alias="type")
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
     source_id: str
-    preconditions: List[str] = Field(default_factory=list)
-    commutativity_key: Optional[str] = None
-    idempotency_key: Optional[str] = None
+    preconditions: list[str] = Field(default_factory=list)
+    commutativity_key: str | None = None
+    idempotency_key: str | None = None
 
 
 class V2AppendOpRequest(BaseModel):
-    op_id: Optional[str] = None
+    op_id: str | None = None
     op_type: str = Field(alias="type")
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
     source_id: str
-    preconditions: List[str] = Field(default_factory=list)
-    commutativity_key: Optional[str] = None
-    idempotency_key: Optional[str] = None
+    preconditions: list[str] = Field(default_factory=list)
+    commutativity_key: str | None = None
+    idempotency_key: str | None = None
 
 
 class V2BranchRequest(BaseModel):
     from_branch: str
     from_seq: int
     name: str
-    note: Optional[str] = None
+    note: str | None = None
 
 
 class V2CommutativityRequest(BaseModel):
@@ -102,9 +102,9 @@ class V2CommutativityRequest(BaseModel):
 class V2ReplayRequest(BaseModel):
     sid: str
     branch: str = "main"
-    from_seq: Optional[int] = Field(default=None, alias="from")
-    to_seq: Optional[int] = Field(default=None, alias="to")
-    reducers: List[str]
+    from_seq: int | None = Field(default=None, alias="from")
+    to_seq: int | None = Field(default=None, alias="to")
+    reducers: list[str]
 
 
 class V2BranchRef(BaseModel):
@@ -115,7 +115,7 @@ class V2BranchRef(BaseModel):
 class V2MergeRequest(BaseModel):
     sid: str
     base: V2BranchRef
-    heads: List[V2BranchRef]
+    heads: list[V2BranchRef]
     policy: str
     reducer: str
 
@@ -198,7 +198,7 @@ def query_belief(session_id: str):
 
 
 @app.get("/v1/sessions/{session_id}/audit")
-def audit_trace(session_id: str, since_event_id: Optional[str] = None):
+def audit_trace(session_id: str, since_event_id: str | None = None):
     events = server.audit_trace(session_id=session_id, since_event_id=since_event_id)
     return {"events": [entry.to_dict() for entry in events]}
 
@@ -300,8 +300,8 @@ def v2_create_branch(sid: str, req: V2BranchRequest):
 def v2_get_ops(
     sid: str,
     branch: str = "main",
-    from_seq: Optional[int] = Query(default=None, alias="from"),
-    to_seq: Optional[int] = Query(default=None, alias="to"),
+    from_seq: int | None = Query(default=None, alias="from"),
+    to_seq: int | None = Query(default=None, alias="to"),
 ):
     return v2_server.get_ops(
         sid=sid,
@@ -315,8 +315,8 @@ def v2_get_ops(
 def v2_get_state(
     sid: str,
     branch: str = "main",
-    at: Optional[int] = None,
-    reducer: Optional[str] = None,
+    at: int | None = None,
+    reducer: str | None = None,
 ):
     return v2_server.get_state(
         sid=sid,

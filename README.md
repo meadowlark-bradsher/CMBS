@@ -6,7 +6,7 @@ monotone, replay-auditable state machine. Prompts stay constant-token even
 as investigations run for hundreds of steps; non-repetition is structurally
 enforced; every elimination is hash-chained for verifiable replay.
 
-## Hero use case: LLM context management
+## LLM context management
 
 A debugging agent runs 80 tool calls to narrow a customer issue. With raw
 conversation history, the prompt has bloated to 40k tokens, the model has
