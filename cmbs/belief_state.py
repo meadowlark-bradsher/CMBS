@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, Iterable, Set
 
 from .spi.hypothesis_provider import HypothesisProvider
 
@@ -16,7 +15,7 @@ from .spi.hypothesis_provider import HypothesisProvider
 @dataclass
 class BeliefState:
     provider: HypothesisProvider
-    _active: Dict[str, bool]
+    _active: dict[str, bool]
     _total: int
 
     def __init__(self, provider: HypothesisProvider) -> None:
@@ -25,12 +24,12 @@ class BeliefState:
         self._total = len(self._active)
 
     @property
-    def survivors(self) -> Set[str]:
+    def survivors(self) -> set[str]:
         return {hid for hid, active in self._active.items() if active}
 
-    def apply_probe(self, probe_id: str, response) -> Set[str]:
+    def apply_probe(self, probe_id: str, response) -> set[str]:
         eliminations = self.provider.apply_probe(probe_id, response)
-        eliminated: Set[str] = set()
+        eliminated: set[str] = set()
         for hid, is_eliminated in eliminations.items():
             if hid not in self._active:
                 raise ValueError(f"Unknown hypothesis id '{hid}' from provider.")
@@ -54,5 +53,5 @@ class BeliefState:
     def is_empty(self) -> bool:
         return len(self.survivors) == 0
 
-    def active_map(self) -> Dict[str, bool]:
+    def active_map(self) -> dict[str, bool]:
         return dict(self._active)

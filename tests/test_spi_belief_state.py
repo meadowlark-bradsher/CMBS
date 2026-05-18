@@ -1,7 +1,8 @@
-from typing import Any, Dict, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from cmbs.belief_state import BeliefState
-from cmbs.spi import HypothesisProvider, discover_providers
+from cmbs.spi import discover_providers
 
 
 class ToyProvider:

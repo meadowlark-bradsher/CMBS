@@ -11,11 +11,12 @@ import hashlib
 import math
 import time
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any
 
-from .core import CMBSCore
 from .belief_state import BeliefState
+from .core import CMBSCore
 from .spi.elimination_store import (
     EliminationProvenance,
     EliminationStore,
@@ -36,10 +37,10 @@ class OntologyBundle:
 class BeliefSnapshot:
     session_id: str
     ontology: OntologyBundle
-    survivors: List[str]
+    survivors: list[str]
     terminated: bool
-    active_obligation_id: Optional[str]
-    audit_head_event_id: Optional[str]
+    active_obligation_id: str | None
+    audit_head_event_id: str | None
 
     @property
     def n_survivors(self) -> int:
@@ -50,7 +51,7 @@ class BeliefSnapshot:
         n = self.n_survivors
         return 0.0 if n <= 1 else math.log2(n)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
             "ontology": {
@@ -73,13 +74,13 @@ class AuditEntry:
     event_id: str
     ts: float
     verb: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     survivors_before_hash: str
     survivors_after_hash: str
-    delta: Dict[str, List[str]]
-    notes: Optional[str] = None
+    delta: dict[str, list[str]]
+    notes: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = {
             "event_id": self.event_id,
             "ts": self.ts,
@@ -96,8 +97,8 @@ class AuditEntry:
 
 @dataclass
 class ObservationRecord:
-    applied_eliminated: List[str]
-    ignored_eliminated: List[str]
+    applied_eliminated: list[str]
+    ignored_eliminated: list[str]
     audit_event_id: str
 
 
@@ -105,21 +106,21 @@ class ObservationRecord:
 class SessionState:
     session_id: str
     ontology: OntologyBundle
-    kernel: Optional[CMBSCore]
-    belief_state: Optional[BeliefState]
-    hypothesis_ids: Set[str]
+    kernel: CMBSCore | None
+    belief_state: BeliefState | None
+    hypothesis_ids: set[str]
     terminated: bool = False
-    active_obligation_id: Optional[str] = None
-    obligation_min_elims: Optional[int] = None
+    active_obligation_id: str | None = None
+    obligation_min_elims: int | None = None
     obligation_elim_count: int = 0
-    audit: List[AuditEntry] = field(default_factory=list)
-    audit_head_event_id: Optional[str] = None
+    audit: list[AuditEntry] = field(default_factory=list)
+    audit_head_event_id: str | None = None
     audit_head_hash: str = ""
-    observation_index: Dict[str, ObservationRecord] = field(default_factory=dict)
+    observation_index: dict[str, ObservationRecord] = field(default_factory=dict)
 
 
 class BeliefServerError(Exception):
-    def __init__(self, code: str, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, code: str, message: str, details: dict[str, Any] | None = None):
         super().__init__(message)
         self.code = code
         self.message = message
@@ -130,10 +131,10 @@ class BeliefServer:
     def __init__(
         self,
         validate_hypotheses: bool = False,
-        belief_provider: Optional[HypothesisProvider] = None,
-        store: Optional[EliminationStore] = None,
+        belief_provider: HypothesisProvider | None = None,
+        store: EliminationStore | None = None,
     ) -> None:
-        self._sessions: Dict[str, SessionState] = {}
+        self._sessions: dict[str, SessionState] = {}
         self._validate_hypotheses = validate_hypotheses
         self._belief_provider = belief_provider
         self._store = store
@@ -141,9 +142,9 @@ class BeliefServer:
     def declare_session(
         self,
         ontology: OntologyBundle,
-        hypotheses: Optional[List[str]],
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[str, BeliefSnapshot]:
+        hypotheses: list[str] | None,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[str, BeliefSnapshot]:
         session_id = str(uuid.uuid4())
         if self._belief_provider is not None:
             provider = self._belief_provider
@@ -203,9 +204,9 @@ class BeliefServer:
         session_id: str,
         source_id: str,
         observation_id: str,
-        eliminated: List[str],
-        justification: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[str], List[str], BeliefSnapshot, str]:
+        eliminated: list[str],
+        justification: dict[str, Any] | None = None,
+    ) -> tuple[list[str], list[str], BeliefSnapshot, str]:
         state = self._get(session_id)
         self._ensure_not_terminated(state)
         if state.belief_state is not None:
@@ -367,7 +368,7 @@ class BeliefServer:
         probe_id: str,
         response: Any,
         source_id: str = "provider",
-    ) -> Tuple[List[str], List[str], BeliefSnapshot, str]:
+    ) -> tuple[list[str], list[str], BeliefSnapshot, str]:
         state = self._get(session_id)
         self._ensure_not_terminated(state)
         if state.belief_state is None:
@@ -391,7 +392,7 @@ class BeliefServer:
         eliminated_set = state.belief_state.apply_probe(probe_id, response)
         after = set(self._survivors(state))
         applied = sorted(eliminated_set)
-        ignored: List[str] = []
+        ignored: list[str] = []
 
         if state.active_obligation_id is not None:
             state.obligation_elim_count += len(applied)
@@ -420,7 +421,7 @@ class BeliefServer:
         state = self._get(session_id)
         return self._snapshot(state)
 
-    def audit_trace(self, session_id: str, since_event_id: Optional[str] = None) -> List[AuditEntry]:
+    def audit_trace(self, session_id: str, since_event_id: str | None = None) -> list[AuditEntry]:
         state = self._get(session_id)
         if since_event_id is None:
             return list(state.audit)
@@ -434,7 +435,7 @@ class BeliefServer:
         session_id: str,
         obligation_id: str,
         min_total_eliminations: int,
-    ) -> Tuple[BeliefSnapshot, str]:
+    ) -> tuple[BeliefSnapshot, str]:
         state = self._get(session_id)
         self._ensure_not_terminated(state)
         if state.active_obligation_id is not None:
@@ -469,8 +470,8 @@ class BeliefServer:
         self,
         session_id: str,
         obligation_id: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[bool, str, BeliefSnapshot, str]:
+        context: dict[str, Any] | None = None,
+    ) -> tuple[bool, str, BeliefSnapshot, str]:
         state = self._get(session_id)
         self._ensure_not_terminated(state)
         if state.active_obligation_id != obligation_id:
@@ -510,8 +511,8 @@ class BeliefServer:
         self,
         session_id: str,
         conclusion_id: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[bool, str, BeliefSnapshot, str]:
+        context: dict[str, Any] | None = None,
+    ) -> tuple[bool, str, BeliefSnapshot, str]:
         state = self._get(session_id)
         self._ensure_not_terminated(state)
         accepted = state.active_obligation_id is None
@@ -534,8 +535,8 @@ class BeliefServer:
     def request_termination(
         self,
         session_id: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[bool, str, BeliefSnapshot, str]:
+        context: dict[str, Any] | None = None,
+    ) -> tuple[bool, str, BeliefSnapshot, str]:
         state = self._get(session_id)
         self._ensure_not_terminated(state)
         if state.active_obligation_id is not None:
@@ -581,11 +582,11 @@ class BeliefServer:
         self,
         state: SessionState,
         verb: str,
-        payload: Dict[str, Any],
-        eliminated: List[str],
-        notes: Optional[str] = None,
-        survivors_before: Optional[Set[str]] = None,
-        survivors_after: Optional[Set[str]] = None,
+        payload: dict[str, Any],
+        eliminated: list[str],
+        notes: str | None = None,
+        survivors_before: set[str] | None = None,
+        survivors_after: set[str] | None = None,
     ) -> str:
         if survivors_before is None:
             survivors_before = set(self._survivors(state))
@@ -706,7 +707,7 @@ class BeliefServer:
                 state.terminated = True
             return
 
-    def _survivors(self, state: SessionState) -> Set[str]:
+    def _survivors(self, state: SessionState) -> set[str]:
         if state.belief_state is not None:
             return set(state.belief_state.survivors)
         if state.kernel is None:
@@ -717,7 +718,7 @@ class BeliefServer:
         return set(state.kernel.survivors)
 
 
-def _hash_survivors(survivors: Set[str], session_id: str, prev_event_hash: str) -> str:
+def _hash_survivors(survivors: set[str], session_id: str, prev_event_hash: str) -> str:
     serialized = "\n".join(sorted(survivors))
     payload = f"{serialized}|{session_id}|{prev_event_hash}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

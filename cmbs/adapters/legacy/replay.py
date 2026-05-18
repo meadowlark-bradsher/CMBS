@@ -7,8 +7,8 @@ CMBSCore without validation or interpretation.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Set
 
 from cmbs.core import CMBSCore, ProbeResult
 
@@ -18,7 +18,7 @@ class LegacyEliminationEvent:
     """Legacy elimination event with opaque identifiers."""
     probe_id: str
     observable_id: str
-    eliminated_hypotheses: Set[str]
+    eliminated_hypotheses: set[str]
 
 
 class LegacyReplayAdapter:
@@ -50,7 +50,7 @@ class LegacyReplayAdapter:
     def submit_elimination_events(
         self,
         events: Iterable[LegacyEliminationEvent],
-    ) -> List[ProbeResult]:
+    ) -> list[ProbeResult]:
         """Submit multiple legacy elimination events in order."""
         return [self.submit_elimination_event(event) for event in events]
 

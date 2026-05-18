@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
 class OperationSpec:
     """Client-submitted operation payload."""
 
-    op_id: Optional[str]
+    op_id: str | None
     op_type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     source_id: str
-    preconditions: List[str] = field(default_factory=list)
-    commutativity_key: Optional[str] = None
-    idempotency_key: Optional[str] = None
+    preconditions: list[str] = field(default_factory=list)
+    commutativity_key: str | None = None
+    idempotency_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -28,16 +28,16 @@ class OperationEnvelope:
     branch_id: str
     origin_seq: int
     op_type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     source_id: str
-    preconditions: List[str]
-    commutativity_key: Optional[str]
-    idempotency_key: Optional[str]
+    preconditions: list[str]
+    commutativity_key: str | None
+    idempotency_key: str | None
     accepted: bool
-    rejected_reason: Optional[str]
+    rejected_reason: str | None
     created_at: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "op_id": self.op_id,
             "seq": self.seq,
@@ -60,12 +60,12 @@ class BranchRecord:
     """Mutable branch state for a session."""
 
     branch_id: str
-    from_branch: Optional[str]
+    from_branch: str | None
     from_seq: int
-    note: Optional[str]
+    note: str | None
     created_at: float
-    op_log: List[OperationEnvelope] = field(default_factory=list)
-    idempotency_index: Dict[str, OperationEnvelope] = field(default_factory=dict)
+    op_log: list[OperationEnvelope] = field(default_factory=list)
+    idempotency_index: dict[str, OperationEnvelope] = field(default_factory=dict)
 
     @property
     def head_seq(self) -> int:
@@ -77,9 +77,9 @@ class SessionRecord:
     """Top-level v2 session state."""
 
     sid: str
-    ontology: Dict[str, Any]
-    initial_hypotheses: List[str]
+    ontology: dict[str, Any]
+    initial_hypotheses: list[str]
     default_reducer: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     created_at: float
-    branches: Dict[str, BranchRecord] = field(default_factory=dict)
+    branches: dict[str, BranchRecord] = field(default_factory=dict)

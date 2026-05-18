@@ -6,9 +6,10 @@ import hashlib
 import re
 import time
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 from .op_models import BranchRecord, OperationEnvelope, OperationSpec, SessionRecord
 from .reducers import (
@@ -25,11 +26,11 @@ class OpAppendResult:
     op_id: str
     seq: int
     accepted: bool
-    rejected_reason: Optional[str]
+    rejected_reason: str | None
     state_hash_after: str
     branch_head_seq: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "op_id": self.op_id,
             "seq": self.seq,
@@ -45,7 +46,7 @@ class OplogServerError(Exception):
         self,
         code: str,
         message: str,
-        details: Optional[Dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
         status_code: int = 400,
     ):
         super().__init__(message)
@@ -56,17 +57,17 @@ class OplogServerError(Exception):
 
 
 class OplogServer:
-    def __init__(self, reducers: Optional[Dict[str, Reducer]] = None) -> None:
+    def __init__(self, reducers: dict[str, Reducer] | None = None) -> None:
         self._reducers = reducers or default_reducer_registry()
-        self._sessions: Dict[str, SessionRecord] = {}
+        self._sessions: dict[str, SessionRecord] = {}
 
     def create_session(
         self,
-        ontology: Dict[str, Any],
-        initial_hypotheses: List[str],
+        ontology: dict[str, Any],
+        initial_hypotheses: list[str],
         default_reducer: str = "v1_mask_meet_tombstone",
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self._require_reducer(default_reducer)
         sid = str(uuid.uuid4())
         now = time.time()
@@ -184,8 +185,8 @@ class OplogServer:
         from_branch: str,
         from_seq: int,
         name: str,
-        note: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        note: str | None = None,
+    ) -> dict[str, Any]:
         session = self._get_session(sid)
         source = self._get_branch(session, from_branch)
         if from_seq < 0 or from_seq > source.head_seq:
@@ -199,7 +200,7 @@ class OplogServer:
         branch_id = self._unique_branch_id(session, name)
         now = time.time()
         copied = list(source.op_log[:from_seq])
-        idem: Dict[str, OperationEnvelope] = {}
+        idem: dict[str, OperationEnvelope] = {}
         for env in copied:
             if env.idempotency_key:
                 idem[env.idempotency_key] = env
@@ -225,9 +226,9 @@ class OplogServer:
         self,
         sid: str,
         branch: str,
-        from_seq: Optional[int] = None,
-        to_seq: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        from_seq: int | None = None,
+        to_seq: int | None = None,
+    ) -> dict[str, Any]:
         session = self._get_session(sid)
         branch_rec = self._get_branch(session, branch)
 
@@ -260,9 +261,9 @@ class OplogServer:
         self,
         sid: str,
         branch: str,
-        at: Optional[int],
-        reducer: Optional[str],
-    ) -> Dict[str, Any]:
+        at: int | None,
+        reducer: str | None,
+    ) -> dict[str, Any]:
         session = self._get_session(sid)
         branch_rec = self._get_branch(session, branch)
         reducer_version = reducer or session.default_reducer
@@ -304,7 +305,7 @@ class OplogServer:
         reducer: str,
         op_a: OperationSpec,
         op_b: OperationSpec,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         session = self._get_session(sid)
         branch_rec = self._get_branch(session, branch)
         self._require_reducer(reducer)
@@ -354,10 +355,10 @@ class OplogServer:
         self,
         sid: str,
         branch: str,
-        from_seq: Optional[int],
-        to_seq: Optional[int],
-        reducers: List[str],
-    ) -> Dict[str, Any]:
+        from_seq: int | None,
+        to_seq: int | None,
+        reducers: list[str],
+    ) -> dict[str, Any]:
         session = self._get_session(sid)
         branch_rec = self._get_branch(session, branch)
 
@@ -389,7 +390,7 @@ class OplogServer:
 
         accepted_slice = [env for env in branch_rec.op_log[start - 1 : end] if env.accepted]
         results = []
-        baseline_projection: Optional[Dict[str, Any]] = None
+        baseline_projection: dict[str, Any] | None = None
 
         for idx, reducer_name in enumerate(reducers):
             self._require_reducer(reducer_name)
@@ -427,10 +428,10 @@ class OplogServer:
         sid: str,
         base_branch: str,
         base_seq: int,
-        heads: List[Dict[str, Any]],
+        heads: list[dict[str, Any]],
         policy: str,
         reducer: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         session = self._get_session(sid)
         base = self._get_branch(session, base_branch)
         self._require_reducer(reducer)
@@ -456,7 +457,7 @@ class OplogServer:
                 status_code=400,
             )
 
-        resolved_heads: List[Tuple[BranchRecord, int]] = []
+        resolved_heads: list[tuple[BranchRecord, int]] = []
         for head in heads:
             branch_name = str(head.get("branch", ""))
             seq = int(head.get("seq", -1))
@@ -500,7 +501,7 @@ class OplogServer:
         )
         merged_branch_id = merge_branch["branch_id"]
 
-        tails: List[OperationEnvelope] = []
+        tails: list[OperationEnvelope] = []
         for branch_rec, seq in resolved_heads:
             tails.extend([op for op in branch_rec.op_log[base_seq:seq] if op.accepted])
         tails.sort(key=lambda op: (op.branch_id, op.origin_seq, op.op_id))
@@ -540,7 +541,7 @@ class OplogServer:
         branch: BranchRecord,
         at_seq: int,
         reducer_version: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         self._require_reducer(reducer_version)
         reducer = self._reducers[reducer_version]
         accepted = [op for op in branch.op_log[:at_seq] if op.accepted]
@@ -552,8 +553,8 @@ class OplogServer:
         branch: BranchRecord,
         base_seq: int,
         reducer_version: str,
-        ops: List[OperationSpec],
-    ) -> Tuple[str, Dict[str, Any]]:
+        ops: list[OperationSpec],
+    ) -> tuple[str, dict[str, Any]]:
         temp_log = list(branch.op_log[:base_seq])
         seq = base_seq
         for idx, spec in enumerate(ops, start=1):
@@ -597,8 +598,8 @@ class OplogServer:
     def _check_preconditions(
         self,
         preconditions: Iterable[str],
-        state_projection: Dict[str, Any],
-    ) -> Tuple[bool, Optional[str]]:
+        state_projection: dict[str, Any],
+    ) -> tuple[bool, str | None]:
         survivors = set(state_projection.get("survivors", []))
         eliminated = set(state_projection.get("eliminated", []))
         attrs = state_projection.get("attrs", {})
@@ -654,7 +655,7 @@ class OplogServer:
         branch: str,
         at: int,
         reducer_version: str,
-        projection: Dict[str, Any],
+        projection: dict[str, Any],
     ) -> str:
         payload = (
             canonical_json(projection)
@@ -722,7 +723,7 @@ class OplogServer:
         )
 
     @staticmethod
-    def _spec_to_dict(spec: OperationSpec) -> Dict[str, Any]:
+    def _spec_to_dict(spec: OperationSpec) -> dict[str, Any]:
         return {
             "op_id": spec.op_id,
             "type": spec.op_type,

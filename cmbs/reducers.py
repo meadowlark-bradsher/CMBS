@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Mapping, Protocol
+from typing import Any, Protocol
 
 from .op_models import OperationEnvelope
 
@@ -14,14 +15,14 @@ class Reducer(Protocol):
         self,
         initial_hypotheses: Iterable[str],
         accepted_ops: Iterable[OperationEnvelope],
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Reduce accepted operations into a state projection."""
 
 
 @dataclass(frozen=True)
 class ReduceResult:
     reducer_version: str
-    state_projection: Dict[str, Any]
+    state_projection: dict[str, Any]
 
 
 class V1MaskMeetTombstoneReducer:
@@ -33,10 +34,10 @@ class V1MaskMeetTombstoneReducer:
         self,
         initial_hypotheses: Iterable[str],
         accepted_ops: Iterable[OperationEnvelope],
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         survivors = set(initial_hypotheses)
         eliminated = set()
-        attrs: Dict[str, Any] = {}
+        attrs: dict[str, Any] = {}
 
         for op in accepted_ops:
             payload = op.payload or {}
@@ -91,10 +92,10 @@ class V1MaskNoRefineReducer:
         self,
         initial_hypotheses: Iterable[str],
         accepted_ops: Iterable[OperationEnvelope],
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         survivors = set(initial_hypotheses)
         eliminated = set()
-        attrs: Dict[str, Any] = {}
+        attrs: dict[str, Any] = {}
 
         for op in accepted_ops:
             payload = op.payload or {}
@@ -121,7 +122,7 @@ class V1MaskNoRefineReducer:
         }
 
 
-def default_reducer_registry() -> Dict[str, Reducer]:
+def default_reducer_registry() -> dict[str, Reducer]:
     reducer_v1 = V1MaskMeetTombstoneReducer()
     reducer_no_refine = V1MaskNoRefineReducer()
     return {
@@ -130,7 +131,7 @@ def default_reducer_registry() -> Dict[str, Reducer]:
     }
 
 
-def summarize_projection(projection: Dict[str, Any]) -> Dict[str, Any]:
+def summarize_projection(projection: dict[str, Any]) -> dict[str, Any]:
     survivors = projection.get("survivors", [])
     eliminated = projection.get("eliminated", [])
     attrs = projection.get("attrs", {})
@@ -141,7 +142,7 @@ def summarize_projection(projection: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def projection_diff(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
+def projection_diff(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     keys = sorted(set(a.keys()) | set(b.keys()))
     changes = []
     for key in keys:

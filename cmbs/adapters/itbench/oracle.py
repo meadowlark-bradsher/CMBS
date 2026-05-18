@@ -4,13 +4,11 @@ Deterministic oracle for ITBench kits.
 
 from __future__ import annotations
 
-from typing import Dict
-
 from .kit import ITBenchKit
 
 
 class ITBenchOracle:
-    def __init__(self, kit: ITBenchKit, scenario: Dict[str, str]):
+    def __init__(self, kit: ITBenchKit, scenario: dict[str, str]):
         self._kit = kit
         self._scenario = dict(scenario)
 

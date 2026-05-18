@@ -6,12 +6,10 @@ entropy, and obligation discipline. It does not select probes, interpret
 observables, or manage workflows. Semantics live in adapters.
 """
 
-from .core import (
-    CMBSCore,
-    EliminationEvent,
-    ObligationExitResult,
-    ProbeResult,
-    TerminationResult,
+from .adapters.legacy import (
+    LegacyEliminationEvent,
+    LegacyReplayAdapter,
+    submit_legacy_elimination,
 )
 from .belief_server import (
     AuditEntry,
@@ -20,8 +18,15 @@ from .belief_server import (
     OntologyBundle,
 )
 from .belief_state import BeliefState
-from .op_models import OperationSpec, OperationEnvelope, BranchRecord, SessionRecord
-from .oplog_server import OplogServer, OplogServerError, OpAppendResult
+from .core import (
+    CMBSCore,
+    EliminationEvent,
+    ObligationExitResult,
+    ProbeResult,
+    TerminationResult,
+)
+from .op_models import BranchRecord, OperationEnvelope, OperationSpec, SessionRecord
+from .oplog_server import OpAppendResult, OplogServer, OplogServerError
 from .spi import (
     EliminationProvenance,
     EliminationResult,
@@ -31,11 +36,6 @@ from .spi import (
     discover_providers,
 )
 from .stores import InMemoryStore
-from .adapters.legacy import (
-    LegacyEliminationEvent,
-    LegacyReplayAdapter,
-    submit_legacy_elimination,
-)
 
 __all__ = [
     "CMBSCore",

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/meadowlark-bradsher/CMBS/security/advisories/new
+    about: For sensitive vulnerability reports, please use private security advisories instead of a public issue.
+  - name: Documentation
+    url: https://meadowlark-bradsher.github.io/CMBS/
+    about: Architecture, API reference, and use cases.
