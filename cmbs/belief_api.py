@@ -1,5 +1,7 @@
 """FastAPI transport for Belief Server v1 and operator-log v2."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from fastapi import FastAPI, Query
