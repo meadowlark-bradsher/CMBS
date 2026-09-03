@@ -1,43 +1,51 @@
+"""Twenty Questions against the unified Session kernel.
+
+The adapter proposes questions, the oracle answers them for a fixed secret,
+and every answer becomes one ``probe_result`` op in the session's log.
+"""
+
+from cmbs import OntologyBundle, Session
 from cmbs.adapters.twenty_questions import TwentyQAdapter, TwentyQOracle, load_builtin_kit
-from cmbs.belief_server import BeliefServer, OntologyBundle
 
 
-def main() -> None:
-    kit = load_builtin_kit("20q_4")
-    server = BeliefServer()
+def run(secret: str = "eagle", kit_name: str = "20q_4") -> Session:
+    kit = load_builtin_kit(kit_name)
     adapter = TwentyQAdapter(kit)
     oracle = TwentyQOracle(kit)
 
-    session_id, snapshot = server.declare_session(
+    session = Session(
+        hypothesis_ids=kit.hypotheses,
         ontology=OntologyBundle(
             hypothesis_space_id="20q",
-            hypothesis_version="20q_4",
+            hypothesis_version=kit_name,
             causal_graph_ref="none",
             causal_graph_version="v0",
         ),
-        hypotheses=kit.hypotheses,
     )
 
-    secret = "eagle"
-    while snapshot.n_survivors > 1:
-        actions = adapter.list_actions(snapshot)
+    while session.snapshot().n_survivors > 1:
+        actions = adapter.list_actions(session.snapshot())
         if not actions:
             break
         action = actions[0]
-        ctx = adapter.apply_action(action.action_id, snapshot)
+        ctx = adapter.apply_action(action.action_id, session.snapshot())
         outcome = oracle.answer(secret=secret, action_id=action.action_id)
-        messages = adapter.observe(ctx, outcome)
-        for msg in messages:
-            _, _, snapshot, _ = server.eliminate(
-                session_id=session_id,
-                source_id=msg.source_id,
-                observation_id=msg.observation_id,
+        for msg in adapter.observe(ctx, outcome):
+            session.submit_probe_result(
+                probe_id=msg.observation_id,
+                observable_id=msg.observation_id,
                 eliminated=msg.eliminated,
-                justification=msg.justification,
+                source_id=msg.source_id,
+                provenance=msg.justification,
             )
+    return session
 
-    print("survivors:", snapshot.survivors)
-    print("audit_events:", len(server.audit_trace(session_id)))
+
+def main() -> None:
+    session = run()
+    print("survivors:", sorted(session.survivors))
+    print("ops:", session.head_seq)
+    print("state_hash:", session.snapshot().state_hash)
 
 
 if __name__ == "__main__":

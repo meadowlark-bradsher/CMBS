@@ -1,9 +1,19 @@
 """
-CMBS v0 Core.
+CMBS — Constraint Mask Belief System.
 
-CMBS is a belief-state accounting system. It tracks hypotheses, eliminations,
-entropy, and obligation discipline. It does not select probes, interpret
-observables, or manage workflows. Semantics live in adapters.
+CMBS is a belief-state accounting system. One ``Session`` is one
+investigation: it tracks hypotheses, records eliminations as an append-only
+op log, computes entropy, and enforces obligation discipline. It does not
+select probes, interpret observables, or manage workflows. Semantics live in
+adapters.
+
+    from cmbs import Session
+
+    session = Session(hypothesis_ids={"H1", "H2", "H3"})
+    session.submit_probe_result(probe_id="P1", observable_id="O1", eliminated={"H1"})
+    assert session.survivors == {"H2", "H3"}
+
+See ``design/adr-001-unify-kernels.md`` and ``design/adr-002-naming.md``.
 """
 
 from .adapters.legacy import (
@@ -11,57 +21,46 @@ from .adapters.legacy import (
     LegacyReplayAdapter,
     submit_legacy_elimination,
 )
-from .belief_server import (
-    AuditEntry,
-    BeliefServer,
-    BeliefSnapshot,
-    OntologyBundle,
-)
-from .belief_state import BeliefState
-from .core import (
-    CMBSCore,
-    EliminationEvent,
+from .operations import AppendResult, OperationEnvelope, OperationSpec
+from .reducer import MaskMeetTombstoneReducer, Reducer, compute_state_hash
+from .session import Session
+from .snapshot import (
+    ObligationEntry,
     ObligationExitResult,
+    OntologyBundle,
     ProbeResult,
+    Snapshot,
     TerminationResult,
 )
-from .op_models import BranchRecord, OperationEnvelope, OperationSpec, SessionRecord
-from .oplog_server import OpAppendResult, OplogServer, OplogServerError
-from .spi import (
-    EliminationProvenance,
-    EliminationResult,
-    EliminationStore,
-    HypothesisProvider,
-    RecoveredState,
-    discover_providers,
-)
-from .stores import InMemoryStore
+from .spi import HypothesisProvider, discover_providers
+from .store import InMemoryOpLogStore, OpLogStore, RecoveredSession
 
 __all__ = [
-    "CMBSCore",
-    "EliminationEvent",
-    "ObligationExitResult",
-    "ProbeResult",
-    "TerminationResult",
-    "AuditEntry",
-    "BeliefServer",
-    "BeliefSnapshot",
+    # kernel
+    "Session",
+    "Snapshot",
+    "ObligationEntry",
     "OntologyBundle",
-    "BeliefState",
+    # operations
     "OperationSpec",
     "OperationEnvelope",
-    "BranchRecord",
-    "SessionRecord",
-    "OplogServer",
-    "OplogServerError",
-    "OpAppendResult",
-    "EliminationProvenance",
-    "EliminationResult",
-    "EliminationStore",
+    "AppendResult",
+    # reducer
+    "Reducer",
+    "MaskMeetTombstoneReducer",
+    "compute_state_hash",
+    # persistence
+    "OpLogStore",
+    "InMemoryOpLogStore",
+    "RecoveredSession",
+    # facade results
+    "ProbeResult",
+    "ObligationExitResult",
+    "TerminationResult",
+    # SPI
     "HypothesisProvider",
-    "RecoveredState",
     "discover_providers",
-    "InMemoryStore",
+    # legacy replay
     "LegacyEliminationEvent",
     "LegacyReplayAdapter",
     "submit_legacy_elimination",

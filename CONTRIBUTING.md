@@ -45,7 +45,7 @@ CI runs the same on Python 3.10, 3.11, and 3.12 — see
    summary`) is used in this repo's history — mirroring it makes the log
    easier to skim.
 4. **Add tests** for behavior changes. The existing test suite is in
-   `tests/`; the kernel's invariant tests in `tests/test_v0_core.py` are
+   `tests/`; the kernel's invariant tests in `tests/test_session_invariants.py` are
    the authoritative reference for kernel semantics.
 5. **Update docs** when public surface or use cases change. The
    `docs/reference/` tree must stay accurate; `docs/use-cases.md` is the
@@ -65,10 +65,13 @@ CI runs the same on Python 3.10, 3.11, and 3.12 — see
 
 ## What lives where
 
-- **Kernel** (`cmbs/core.py`): invariant enforcement only. Changes here
-  need careful review against `tests/test_v0_core.py`.
-- **Servers** (`cmbs/belief_server.py`, `cmbs/oplog_server.py`): session
-  management, audit, policy enforcement above the kernel.
+- **Kernel** (`cmbs/session.py`, `cmbs/reducer.py`, `cmbs/snapshot.py`,
+  `cmbs/operations.py`): the `Session` facade, the reducer that enforces
+  the invariants, and the types they exchange. Changes here need careful
+  review against `tests/test_session_invariants.py` and
+  `tests/test_session_kernel.py`.
+- **Persistence** (`cmbs/store.py`): the `OpLogStore` SPI and the
+  in-memory implementation. Other backends live outside the package.
 - **SPI** (`cmbs/spi/`): protocols third parties implement against. Treat
   signatures as semi-stable; breaking changes need a migration note.
 - **Adapters** (`cmbs/adapters/`): domain translation. Each adapter is

@@ -20,7 +20,7 @@ Closes #
 ## Boundary impact
 
 <!-- CMBS guards a kernel/policy boundary. If this PR touches that boundary —
-     e.g. adds new methods to CMBSCore, changes invariant semantics, or
+     e.g. adds new methods to Session, changes invariant semantics, or
      introduces domain logic into the kernel — describe the impact and why
      it's acceptable. If it doesn't touch the boundary, say "none". -->
 

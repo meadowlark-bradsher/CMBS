@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from ..belief_server import BeliefSnapshot
+from ..snapshot import Snapshot
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ class Action:
 @dataclass(frozen=True)
 class AdapterActionContext:
     action_id: str
-    snapshot: BeliefSnapshot
+    snapshot: Snapshot
     payload: dict[str, Any] = field(default_factory=dict)
 
 
@@ -52,10 +52,10 @@ BeliefMessage = EliminateMessage
 
 
 class BeliefAdapter(Protocol):
-    def list_actions(self, snapshot: BeliefSnapshot) -> list[Action]:
+    def list_actions(self, snapshot: Snapshot) -> list[Action]:
         """Return available probes/actions given current belief."""
 
-    def apply_action(self, action_id: str, snapshot: BeliefSnapshot) -> AdapterActionContext:
+    def apply_action(self, action_id: str, snapshot: Snapshot) -> AdapterActionContext:
         """Prepare to execute the action (prompt, query, probe)."""
 
     def observe(
