@@ -276,7 +276,7 @@ class CMBSCore:
         }
 
     @classmethod
-    def deserialize(cls, state: Any) -> "CMBSCore":
+    def deserialize(cls, state: Any) -> CMBSCore:
         """
         Deserialize core state from checkpoint.
 

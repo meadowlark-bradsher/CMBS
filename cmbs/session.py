@@ -15,8 +15,13 @@ for the rationale behind this shape.
 
 from __future__ import annotations
 
-from .operations import AppendResult, OperationSpec
-from .reducer import Reducer
+import copy
+import time
+import uuid
+from collections.abc import Iterable
+
+from .operations import AppendResult, OperationEnvelope, OperationSpec
+from .reducer import MaskMeetTombstoneReducer, Reducer
 from .snapshot import (
     ObligationExitResult,
     OntologyBundle,
@@ -24,7 +29,7 @@ from .snapshot import (
     Snapshot,
     TerminationResult,
 )
-from .store import OpLogStore
+from .store import InMemoryOpLogStore, OpLogStore
 
 
 class Session:
@@ -37,11 +42,15 @@ class Session:
     The session is single-purpose: one universe, one log, one terminal
     state. To run multiple investigations in parallel, create multiple
     Session instances.
+
+    The session is the single writer to its log. It keeps the current
+    snapshot cached and advances it one ``apply`` step per append; the
+    cached snapshot is always equal to a full ``reduce`` of the log.
     """
 
     def __init__(
         self,
-        hypothesis_ids: set[str] | frozenset[str],
+        hypothesis_ids: Iterable[str],
         *,
         ontology: OntologyBundle | None = None,
         reducer: Reducer | None = None,
@@ -65,7 +74,33 @@ class Session:
         :param session_id: optional caller-supplied ID. A UUID is
             generated if omitted.
         """
-        raise NotImplementedError("Session.__init__")
+        universe = frozenset(hypothesis_ids)
+        for hid in universe:
+            if not isinstance(hid, str):
+                raise TypeError(f"hypothesis IDs must be strings, got {hid!r}")
+        if isinstance(stability_window, bool) or not isinstance(stability_window, int):
+            raise TypeError("stability_window must be an int")
+        if stability_window < 0:
+            raise ValueError("stability_window must be >= 0")
+
+        self._session_id = session_id if session_id is not None else str(uuid.uuid4())
+        self._initial = universe
+        self._ontology = ontology
+        self._stability_window = stability_window
+        self._reducer: Reducer = reducer if reducer is not None else MaskMeetTombstoneReducer()
+        self._store: OpLogStore = store if store is not None else InMemoryOpLogStore()
+
+        self._store.create_session(
+            self._session_id,
+            universe,
+            ontology,
+            stability_window,
+            self._reducer.version,
+        )
+        self._snapshot: Snapshot = self._reducer.initial(
+            self._session_id, universe, stability_window=stability_window
+        )
+        self._op_ids: set[str] = set()
 
     # ------------------------------------------------------------------
     # Imperative facade — common cases
@@ -75,7 +110,7 @@ class Session:
         self,
         probe_id: str,
         observable_id: str,
-        eliminated: set[str] | frozenset[str],
+        eliminated: Iterable[str],
         *,
         source_id: str = "",
         provenance: dict | None = None,
@@ -85,16 +120,41 @@ class Session:
         Translates to an envelope of ``op_type="probe_result"`` with
         ``payload`` carrying ``observable_id``, ``eliminate``, and any
         opaque ``provenance`` dict. ``probe_id`` becomes the envelope's
-        ``idempotency_key`` — re-submission of the same ``probe_id``
-        returns the previous result without mutating state (INV-3
-        enforcement).
+        ``idempotency_key`` — re-submission of the same ``probe_id`` is
+        rejected by the reducer and logged as a rejected envelope, with
+        no state change (INV-3 enforcement).
 
         Empty ``eliminated`` is recorded normally; the envelope enters
         the audit log with ``eliminate=[]``, and any active obligation
         increments its in-scope count by 0. The audit reflects that the
         probe happened.
         """
-        raise NotImplementedError
+        if not isinstance(probe_id, str):
+            raise TypeError("probe_id must be a string")
+        requested = frozenset(eliminated)
+        payload: dict = {
+            "observable_id": observable_id,
+            "eliminate": sorted(requested),
+        }
+        if provenance is not None:
+            payload["provenance"] = dict(provenance)
+
+        before = self._snapshot
+        result = self.append(
+            OperationSpec(
+                op_type="probe_result",
+                payload=payload,
+                source_id=source_id,
+                idempotency_key=probe_id,
+            )
+        )
+        if not result.envelope.accepted:
+            return ProbeResult(accepted=False, error=result.envelope.rejected_reason)
+        return ProbeResult(
+            accepted=True,
+            eliminated=requested & before.survivors,
+            already_eliminated=requested & before.eliminated,
+        )
 
     def enter_obligation(
         self,
@@ -102,12 +162,25 @@ class Session:
         min_eliminations: int = 1,
         *,
         source_id: str = "",
-    ) -> None:
+    ) -> AppendResult:
         """Open an obligation requiring at least ``min_eliminations``
         eliminations within scope before it can be exited (INV-6).
         Adapter-initiated; the kernel never opens obligations
-        automatically."""
-        raise NotImplementedError
+        automatically.
+
+        Returns the append result so the caller can see whether the entry
+        was accepted (it is rejected if ``obligation_id`` is already open).
+        """
+        return self.append(
+            OperationSpec(
+                op_type="enter_obligation",
+                payload={
+                    "obligation_id": obligation_id,
+                    "min_eliminations": min_eliminations,
+                },
+                source_id=source_id,
+            )
+        )
 
     def request_obligation_exit(
         self,
@@ -118,17 +191,33 @@ class Session:
         """Request to close ``obligation_id``. Permitted only if its
         in-scope elimination count has met or exceeded its
         ``min_eliminations`` (INV-6)."""
-        raise NotImplementedError
+        result = self.append(
+            OperationSpec(
+                op_type="exit_obligation",
+                payload={"obligation_id": obligation_id},
+                source_id=source_id,
+            )
+        )
+        return ObligationExitResult(
+            permitted=result.envelope.accepted,
+            error=result.envelope.rejected_reason,
+        )
 
     def declare_conclusion(
         self,
         conclusion_id: str,
         *,
         source_id: str = "",
-    ) -> None:
+    ) -> AppendResult:
         """Record a current conclusion. Used by the stability window
         check; the kernel does not interpret conclusion meaning."""
-        raise NotImplementedError
+        return self.append(
+            OperationSpec(
+                op_type="declare_conclusion",
+                payload={"conclusion_id": conclusion_id},
+                source_id=source_id,
+            )
+        )
 
     def request_termination(
         self,
@@ -144,7 +233,13 @@ class Session:
         Does **not** require singleton survivors, low entropy, or all
         obligations closed — those are policy choices left to the caller.
         """
-        raise NotImplementedError
+        result = self.append(
+            OperationSpec(op_type="request_termination", payload={}, source_id=source_id)
+        )
+        return TerminationResult(
+            permitted=result.envelope.accepted,
+            error=result.envelope.rejected_reason,
+        )
 
     # ------------------------------------------------------------------
     # Lower-level append API
@@ -156,8 +251,61 @@ class Session:
         The reducer determines whether the op is accepted or rejected;
         either way the envelope enters the log. Returns the persisted
         envelope plus the post-state hash and survivor count.
+
+        Two dedupe mechanisms apply, with different meanings:
+
+        - A caller-supplied ``op_id`` that is already in the log is a
+          transport-level retry. Nothing is appended; the original
+          envelope and the state hash at its position are returned.
+        - An ``idempotency_key`` already consumed by an accepted op is a
+          domain-level repeat (INV-3). A new, *rejected* envelope is
+          appended so the attempt is auditable.
         """
-        raise NotImplementedError
+        if not isinstance(spec, OperationSpec):
+            raise TypeError("append expects an OperationSpec")
+        if not isinstance(spec.op_type, str) or not spec.op_type:
+            raise ValueError("op_type must be a non-empty string")
+
+        if spec.op_id is not None and spec.op_id in self._op_ids:
+            return self._result_for_existing(spec.op_id)
+
+        accepted, reason = self._reducer.check(self._snapshot, spec)
+        envelope = OperationEnvelope(
+            op_id=spec.op_id if spec.op_id is not None else str(uuid.uuid4()),
+            seq=self._snapshot.seq + 1,
+            op_type=spec.op_type,
+            payload=copy.deepcopy(dict(spec.payload or {})),
+            source_id=spec.source_id,
+            idempotency_key=spec.idempotency_key,
+            accepted=accepted,
+            rejected_reason=reason,
+            created_at=time.time(),
+        )
+        self._store.append(self._session_id, envelope)
+        self._snapshot = self._reducer.apply(self._snapshot, envelope)
+        self._op_ids.add(envelope.op_id)
+        return AppendResult(
+            envelope=envelope,
+            state_hash_after=self._snapshot.state_hash,
+            survivors_count_after=self._snapshot.n_survivors,
+        )
+
+    def _result_for_existing(self, op_id: str) -> AppendResult:
+        ops = self._store.read_ops(self._session_id)
+        for envelope in ops:
+            if envelope.op_id == op_id:
+                state = self._reducer.reduce(
+                    self._initial,
+                    ops[: envelope.seq],
+                    session_id=self._session_id,
+                    stability_window=self._stability_window,
+                )
+                return AppendResult(
+                    envelope=envelope,
+                    state_hash_after=state.state_hash,
+                    survivors_count_after=state.n_survivors,
+                )
+        raise RuntimeError(f"op_id {op_id!r} indexed but not found in store")  # pragma: no cover
 
     # ------------------------------------------------------------------
     # Read access
@@ -165,44 +313,68 @@ class Session:
 
     @property
     def session_id(self) -> str:
-        raise NotImplementedError
+        return self._session_id
+
+    @property
+    def ontology(self) -> OntologyBundle | None:
+        return self._ontology
+
+    @property
+    def stability_window(self) -> int:
+        return self._stability_window
+
+    @property
+    def reducer(self) -> Reducer:
+        return self._reducer
+
+    @property
+    def initial_hypotheses(self) -> frozenset[str]:
+        """The universe this session was created with."""
+        return self._initial
 
     @property
     def survivors(self) -> frozenset[str]:
         """Currently surviving hypothesis IDs."""
-        raise NotImplementedError
+        return self._snapshot.survivors
 
     @property
     def entropy(self) -> float:
         """``log₂(|survivors|)``; 0.0 if ≤1 survivor (INV-5a)."""
-        raise NotImplementedError
+        return self._snapshot.entropy
 
     @property
     def consumed_probes(self) -> frozenset[str]:
-        """Set of ``probe_id`` values already submitted."""
-        raise NotImplementedError
+        """Idempotency keys consumed by accepted ops. The facade populates
+        this with ``probe_id`` values; callers of ``append`` who supply
+        their own keys will see those here too."""
+        return self._snapshot.consumed_op_ids
 
     @property
     def active_obligations(self) -> frozenset[str]:
         """Currently open obligation IDs."""
-        raise NotImplementedError
+        return self._snapshot.active_obligations
 
     @property
     def is_terminated(self) -> bool:
         """Whether ``request_termination`` has succeeded for this session."""
-        raise NotImplementedError
+        return self._snapshot.terminated
+
+    @property
+    def head_seq(self) -> int:
+        """Seq of the last envelope in the log (0 if empty)."""
+        return self._snapshot.seq
 
     def snapshot(self) -> Snapshot:
         """Return an immutable view of the current state."""
-        raise NotImplementedError
+        return self._snapshot
 
     def operations(
         self,
         from_seq: int | None = None,
         to_seq: int | None = None,
-    ) -> tuple:
+    ) -> tuple[OperationEnvelope, ...]:
         """Return persisted envelopes in the inclusive seq range."""
-        raise NotImplementedError
+        return self._store.read_ops(self._session_id, from_seq, to_seq)
 
     # ------------------------------------------------------------------
     # Recovery
@@ -216,5 +388,32 @@ class Session:
         *,
         reducer: Reducer | None = None,
     ) -> Session:
-        """Reconstitute a session from its persisted op log."""
-        raise NotImplementedError
+        """Reconstitute a session from its persisted op log.
+
+        The store records which reducer version wrote the log; replaying
+        under a different version would silently change meaning, so a
+        mismatch raises ``ValueError``.
+        """
+        record = store.recover(session_id)
+        active: Reducer = reducer if reducer is not None else MaskMeetTombstoneReducer()
+        if active.version != record.reducer_version:
+            raise ValueError(
+                f"Session {session_id!r} was written under reducer "
+                f"{record.reducer_version!r}; cannot replay under {active.version!r}."
+            )
+
+        session = cls.__new__(cls)
+        session._session_id = record.session_id
+        session._initial = frozenset(record.initial_hypotheses)
+        session._ontology = record.ontology
+        session._stability_window = record.stability_window
+        session._reducer = active
+        session._store = store
+        session._snapshot = active.reduce(
+            session._initial,
+            record.envelopes,
+            session_id=record.session_id,
+            stability_window=record.stability_window,
+        )
+        session._op_ids = {envelope.op_id for envelope in record.envelopes}
+        return session

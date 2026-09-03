@@ -44,6 +44,12 @@ class Snapshot:
 
     Produced by ``Reducer.reduce``; returned by ``Session.snapshot()`` and
     embedded in ``AppendResult.state_hash_after`` indirectly via hashing.
+
+    ``seq`` is the log position the snapshot reflects — the ``seq`` of the
+    last envelope folded in, accepted or not (0 for a fresh session).
+    ``stability_window`` is session configuration carried on the snapshot
+    so that a reducer can gate ``request_termination`` (INV-2) from the
+    snapshot alone.
     """
 
     session_id: str
@@ -56,6 +62,7 @@ class Snapshot:
     conclusion_history: tuple[str, ...]
     terminated: bool
     attrs: dict[str, Any] = field(default_factory=dict)
+    stability_window: int = 0
 
     @property
     def n_survivors(self) -> int:
@@ -73,6 +80,13 @@ class Snapshot:
     @property
     def active_obligations(self) -> frozenset[str]:
         return frozenset(o.obligation_id for o in self.obligations)
+
+    def obligation(self, obligation_id: str) -> ObligationEntry | None:
+        """Return the active obligation with this ID, or ``None``."""
+        for entry in self.obligations:
+            if entry.obligation_id == obligation_id:
+                return entry
+        return None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,12 +110,19 @@ class Snapshot:
             "conclusion_history": list(self.conclusion_history),
             "terminated": self.terminated,
             "attrs": dict(self.attrs),
+            "stability_window": self.stability_window,
         }
 
 
 @dataclass(frozen=True)
 class ProbeResult:
-    """Outcome of ``Session.submit_probe_result``."""
+    """Outcome of ``Session.submit_probe_result``.
+
+    ``eliminated`` is the set of hypotheses this probe newly removed;
+    ``already_eliminated`` is the requested subset that had been removed
+    by an earlier op. IDs outside the session's universe are ignored and
+    appear in neither.
+    """
 
     accepted: bool
     error: str | None = None
