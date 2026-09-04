@@ -47,6 +47,9 @@ the old surface is removed outright rather than deprecated.
 - Runtime dependencies reduced to `pyyaml`. CMBS is library-only at v1.
 - A repeated `probe_id` is logged as a rejected envelope rather than
   silently ignored, so the attempt is auditable.
+- `docs/` rewritten against the unified surface: architecture (state as
+  the reduction of a log), use cases, full API reference, repository
+  layout, and the invariant test matrix.
 
 ### Removed
 - `CMBSCore`, `BeliefState`, `BeliefServer`, `BeliefSnapshot`,
