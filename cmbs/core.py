@@ -5,6 +5,8 @@ Core belief-state accounting API and implementation.
 Opaque identifiers only, no domain semantics, adapter-provided thresholds.
 """
 
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -274,7 +276,7 @@ class CMBSCore:
         }
 
     @classmethod
-    def deserialize(cls, state: Any) -> "CMBSCore":
+    def deserialize(cls, state: Any) -> CMBSCore:
         """
         Deserialize core state from checkpoint.
 
