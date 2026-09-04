@@ -4,7 +4,7 @@
 been ruled out and why" *out* of your LLM prompt and *in* an inspectable,
 monotone, replay-auditable state machine. Prompts stay constant-token even
 as investigations run for hundreds of steps; non-repetition is structurally
-enforced; every elimination is hash-chained for verifiable replay.
+enforced; every step of the op log carries a state hash for verifiable replay.
 
 ## LLM context management
 
@@ -14,20 +14,20 @@ forgotten which hypotheses it already ruled out, and "we already tried X"
 gets repeated. With CMBS:
 
 ```python
-from cmbs import CMBSCore
+from cmbs import Session
 
-core = CMBSCore(hypothesis_ids=set(your_hypothesis_registry))
-core.enter_obligation("investigate", min_eliminations=3)
+session = Session(hypothesis_ids=your_hypothesis_registry)
+session.enter_obligation("investigate", min_eliminations=3)
 
-while not core.is_terminated:
+while not session.is_terminated:
     proposal = llm(render_prompt(
-        survivors=sorted(core.survivors),         # current frontier
-        entropy=core.entropy,                     # bits remaining
-        recent=core.get_elimination_history()[-3:],  # last 3 events
+        survivors=sorted(session.survivors),      # current frontier
+        entropy=session.entropy,                  # bits remaining
+        recent=session.operations()[-3:],         # last 3 ops from the log
     ))
     observation = run_probe(proposal)
-    eliminated = adapter.interpret(observation, core.survivors)
-    core.submit_probe_result(
+    eliminated = adapter.interpret(observation, session.survivors)
+    session.submit_probe_result(
         probe_id=proposal["probe_id"],
         observable_id=proposal["observable_id"],
         eliminated=eliminated,
@@ -35,8 +35,8 @@ while not core.is_terminated:
 ```
 
 The prompt size is `O(|survivors| + k)`, not `O(turns)`. The kernel rejects
-duplicate `probe_id`s; obligations gate premature conclusions; the audit
-trail is hash-chained for after-the-fact replay. See
+duplicate `probe_id`s; obligations gate premature conclusions; the op log
+carries a state hash per step for after-the-fact replay. See
 [docs/use-cases.md](docs/use-cases.md) for the full pattern and other
 applications (auditable diagnosis, multi-agent belief sharing, counterfactual
 exploration).
@@ -44,8 +44,8 @@ exploration).
 ## What CMBS does and doesn't do
 
 CMBS is mechanism, not policy. It tracks hypotheses, records eliminations,
-computes entropy, enforces obligation discipline, and maintains a replayable
-audit log. It does *not* execute probes, choose actions, interpret
+computes entropy, enforces obligation discipline, and keeps the op log that
+is its own replayable audit trail. It does *not* execute probes, choose actions, interpret
 observables, or maintain probabilistic beliefs — those belong to adapters
 and to the surrounding agent.
 
@@ -54,27 +54,32 @@ It's intended to sit alongside frozen or learning agents, not inside them.
 ## Quick Start
 
 ```python
-from cmbs.core import CMBSCore
+from cmbs import Session
 
-core = CMBSCore(hypothesis_ids={"H1", "H2", "H3"})
-result = core.submit_probe_result(
+session = Session(hypothesis_ids={"H1", "H2", "H3"})
+result = session.submit_probe_result(
     probe_id="P1",
     observable_id="O1",
     eliminated={"H1"},
 )
 assert result.accepted
+assert session.survivors == {"H2", "H3"}
 ```
+
+State is derived from an append-only op log: every call above is an
+`OperationEnvelope` you can read back with `session.operations()`, and a
+session can be rebuilt from its `OpLogStore` with `Session.recover`.
 
 ## Legacy Replay Shim
 
 For audit continuity with legacy logs, use the thin adapter in `cmbs.adapters.legacy`:
 
 ```python
-from cmbs.core import CMBSCore
+from cmbs import Session
 from cmbs.adapters.legacy import LegacyReplayAdapter, LegacyEliminationEvent
 
-core = CMBSCore(hypothesis_ids={"H1", "H2"})
-adapter = LegacyReplayAdapter(core)
+session = Session(hypothesis_ids={"H1", "H2"})
+adapter = LegacyReplayAdapter(session)
 
 adapter.submit_elimination_event(
     LegacyEliminationEvent(

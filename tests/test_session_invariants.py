@@ -1,9 +1,9 @@
 """
 Invariant test suite for the unified ``Session`` kernel.
 
-Ported from ``tests/test_v0_core.py``. Same 49 tests against the new
-public surface decided in ADR-002. All will be red until the kernel
-implementation lands.
+Ported from the v0 kernel's suite (``tests/test_v0_core.py``, removed in
+the unification). The same 49 tests, asserted against the ``Session``
+surface decided in ADR-002.
 """
 
 import math

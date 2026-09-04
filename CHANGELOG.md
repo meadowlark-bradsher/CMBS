@@ -7,17 +7,62 @@ once it reaches 1.0.0.
 
 ## [Unreleased]
 
+The v0 and v2 kernels are unified into a single `Session` kernel per
+[ADR-001](design/adr-001-unify-kernels.md) and
+[ADR-002](design/adr-002-naming.md). No published consumers existed, so
+the old surface is removed outright rather than deprecated.
+
 ### Added
+- `Session` — the unified kernel. One instance is one investigation;
+  state is `reduce(initial_hypotheses, op_log)`. Imperative facade
+  (`submit_probe_result`, `enter_obligation`, `request_obligation_exit`,
+  `declare_conclusion`, `request_termination`) plus a lower-level
+  `append(OperationSpec)`; `snapshot()`, `operations()`, and
+  `Session.recover(store, session_id)`.
+- `Reducer` protocol and the shipped `MaskMeetTombstoneReducer`
+  (`"v1_mask_meet_tombstone"`), which enforces INV-2, INV-3, and INV-6 at
+  append time and records rejected ops in the log with a reason.
+- `OpLogStore` persistence SPI with `InMemoryOpLogStore`; recovery
+  returns a `RecoveredSession` and refuses to replay under a different
+  reducer version.
+- `Snapshot`, `OperationSpec`, `OperationEnvelope`, `AppendResult`,
+  `compute_state_hash`.
 - `load_builtin_kit(name)` in both reference adapters
   (`cmbs.adapters.twenty_questions`, `cmbs.adapters.itbench`) — loads
   kit YAMLs via `importlib.resources` so examples and downstream users
   work after `pip install`, not just from a repo checkout.
 - `ruff` linter configured in `pyproject.toml`; enforced in CI.
-- `.dockerignore`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
-  `CHANGELOG.md`, GitHub issue and pull-request templates.
+- `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, GitHub issue
+  and pull-request templates.
+- Tests: `test_session_invariants.py` (the 49 v0 invariant tests ported
+  to `Session`), `test_session_kernel.py` (op log, hashing, retries,
+  store SPI, recovery), `test_spi.py`, `test_examples.py`.
 
 ### Changed
-- Examples now use `load_builtin_kit` instead of hardcoded relative paths.
+- `LegacyReplayAdapter` and `submit_legacy_elimination` now take a
+  `Session` instead of a `CMBSCore`, and accept an optional `source_id`.
+- `BeliefAdapter` / `AdapterActionContext` are typed against `Snapshot`.
+- Examples drive a `Session` directly and use `load_builtin_kit`
+  instead of hardcoded relative paths.
+- Runtime dependencies reduced to `pyyaml`. CMBS is library-only at v1.
+- A repeated `probe_id` is logged as a rejected envelope rather than
+  silently ignored, so the attempt is auditable.
+
+### Removed
+- `CMBSCore`, `BeliefState`, `BeliefServer`, `BeliefSnapshot`,
+  `AuditEntry`, `EliminationEvent` (v0) — replaced by `Session`,
+  `Snapshot`, and the op log.
+- `OplogServer`, `OplogServerError`, `OpAppendResult`, `BranchRecord`,
+  `SessionRecord`, and the reducer registry (v2) — replaced by `Session`,
+  `AppendResult`, and `MaskMeetTombstoneReducer`. Branching, merge, and
+  commutativity analysis are not carried over; the op log makes them
+  reintroducible as a layer on top when a use case needs them.
+- `EliminationStore` SPI, `EliminationProvenance`, `EliminationResult`,
+  `RecoveredState`, `InMemoryStore` — replaced by `OpLogStore`,
+  `InMemoryOpLogStore`, and `RecoveredSession`.
+- FastAPI HTTP surface (`cmbs.belief_api`), `Dockerfile`,
+  `.dockerignore`, and the `fastapi`, `pydantic`, `uvicorn` dependencies.
+  Client-server access can return as separate work on top of the kernel.
 
 ## [0.1.0] — 2026-05-16
 

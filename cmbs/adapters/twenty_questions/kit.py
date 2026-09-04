@@ -43,10 +43,36 @@ def _kit_from_text(text: str) -> TwentyQKit:
     for item in actions_raw:
         action_id = item["id"]
         question = item["question"]
-        keep = item["keep"]
+        keep = _normalize_keep(item["keep"], action_id)
         actions[action_id] = ActionSpec(action_id=action_id, question=question, keep=keep)
         order.append(action_id)
     return TwentyQKit(hypotheses=hypotheses, actions=actions, actions_order=order)
+
+
+def _normalize_keep(raw: dict, action_id: str) -> dict[str, list[str]]:
+    """Coerce the outcome keys of a ``keep`` block to ``"yes"`` / ``"no"``.
+
+    YAML 1.1 (which PyYAML implements) reads bare ``yes:`` and ``no:`` keys
+    as booleans, so a kit file written the natural way arrives here with
+    ``True`` / ``False`` keys. Accept those, quoted strings, and any case.
+    """
+    keep: dict[str, list[str]] = {}
+    for key, hypotheses in raw.items():
+        if key is True:
+            outcome = "yes"
+        elif key is False:
+            outcome = "no"
+        else:
+            outcome = str(key).strip().lower()
+        if outcome not in {"yes", "no"}:
+            raise ValueError(
+                f"Action '{action_id}': keep outcomes must be yes/no, got {key!r}."
+            )
+        keep[outcome] = list(hypotheses)
+    missing = {"yes", "no"} - keep.keys()
+    if missing:
+        raise ValueError(f"Action '{action_id}': keep is missing outcome(s) {sorted(missing)}.")
+    return keep
 
 
 def _parse_yaml(text: str) -> dict:

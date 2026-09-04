@@ -18,7 +18,7 @@ labels: bug
 <!-- Smallest possible code (or commands) that exhibits the problem. -->
 
 ```python
-from cmbs import CMBSCore
+from cmbs import Session
 # ...
 ```
 
