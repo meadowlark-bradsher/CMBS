@@ -8,7 +8,7 @@ reference.
 from cmbs import (
     Session, Snapshot, ObligationEntry, OntologyBundle,
     OperationSpec, OperationEnvelope, AppendResult,
-    Reducer, MaskMeetTombstoneReducer, compute_state_hash,
+    Reducer, MaskMeetTombstoneReducer, compute_state_hash, compute_position_digest,
     OpLogStore, InMemoryOpLogStore, RecoveredSession,
     ProbeResult, ObligationExitResult, TerminationResult,
     HypothesisProvider, discover_providers,
@@ -78,6 +78,7 @@ Two dedupe rules apply, with different meanings:
 | `active_obligations`                 | `frozenset[str]`                  | Currently open obligation IDs                                      |
 | `is_terminated`                      | `bool`                            | Whether `request_termination` has succeeded                        |
 | `head_seq`                           | `int`                             | Seq of the last envelope (0 if empty)                              |
+| `position_digest`                    | `str`                             | Session-independent identity of the survivor set; see [`compute_position_digest`](#compute_position_digest) |
 | `initial_hypotheses`                 | `frozenset[str]`                  | The universe the session was created with                          |
 | `ontology`, `stability_window`, `reducer` |                              | Construction parameters, read back                                 |
 | `snapshot()`                         | `Snapshot`                        | Immutable view of the current state                                |
@@ -112,7 +113,7 @@ returned by `Session.snapshot()`.
 | `attrs`               | `dict[str, Any]`                 | Set by `assert` / `oracle_answer` ops; read by `refine`  |
 | `stability_window`    | `int`                            | Carried so the reducer can gate INV-2 from the snapshot  |
 
-Derived: `n_survivors`, `entropy`, `active_obligations`,
+Derived: `n_survivors`, `entropy`, `active_obligations`, `position_digest`,
 `obligation(obligation_id) -> ObligationEntry | None`, and `to_dict()` for a
 JSON-serializable form.
 
@@ -206,6 +207,25 @@ window, attrs), the reducer version, the session ID, and `seq`. The hash does
 not include `snapshot.state_hash` itself. Two snapshots hash equal iff they
 describe the same belief at the same position of the same session under the
 same reducer.
+
+### `compute_position_digest`
+
+```python
+compute_position_digest(survivors: Iterable[str]) -> str
+```
+
+SHA-256 over the sorted survivor set and nothing else. Where `state_hash`
+names a position in one session's log, this names a position in the belief
+lattice: two sessions with the same survivors share a digest whatever their
+IDs, log lengths, obligations, or conclusion history, and an op that
+eliminates nothing leaves it unchanged. The universe is not included, so
+pair it with `initial_hypotheses` when "this point in this lattice" matters.
+Exposed as `Snapshot.position_digest` and `Session.position_digest`.
+
+Typical uses: confirming two agents have converged without exchanging logs,
+detecting a zero-information probe inside a loop, keying a policy cache or
+value table on the frontier, and naming the meet of two positions
+(`compute_position_digest(a.survivors & b.survivors)`).
 
 ## OpLogStore SPI
 

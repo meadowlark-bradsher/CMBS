@@ -360,6 +360,12 @@ class Session:
         return self._snapshot.terminated
 
     @property
+    def position_digest(self) -> str:
+        """Session-independent identity of the current survivor set.
+        See :func:`cmbs.snapshot.compute_position_digest`."""
+        return self._snapshot.position_digest
+
+    @property
     def head_seq(self) -> int:
         """Seq of the last envelope in the log (0 if empty)."""
         return self._snapshot.seq

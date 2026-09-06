@@ -22,7 +22,7 @@ from cmbs.reducer import (
     Reducer,
 )
 from cmbs.session import Session
-from cmbs.snapshot import OntologyBundle
+from cmbs.snapshot import OntologyBundle, compute_position_digest
 from cmbs.store import InMemoryOpLogStore, OpLogStore
 
 
@@ -489,3 +489,76 @@ class TestStoreAndRecovery:
         assert d["active_obligations"] == ["O1"]
         assert d["stability_window"] == 1
         assert d["seq"] == 2
+
+
+# -----------------------------------------------------------------------------
+# Session-independent position identity
+# -----------------------------------------------------------------------------
+
+
+class TestPositionDigest:
+    def test_equal_across_sessions_with_same_survivors(self):
+        a = Session(hypothesis_ids={"H1", "H2", "H3"}, session_id="a", stability_window=2)
+        b = Session(hypothesis_ids={"H1", "H2", "H3"}, session_id="b")
+        _probe(a, "P1", {"H1"})
+        a.enter_obligation("O1", 1)
+        a.declare_conclusion("C")
+        _probe(b, "Q9", {"H1"})
+
+        assert a.snapshot().state_hash != b.snapshot().state_hash
+        assert a.position_digest == b.position_digest
+        assert a.snapshot().position_digest == a.position_digest
+
+    def test_differs_when_survivors_differ(self):
+        a = Session(hypothesis_ids={"H1", "H2"})
+        b = Session(hypothesis_ids={"H1", "H2"})
+        _probe(a, "P", {"H1"})
+        _probe(b, "P", {"H2"})
+        assert a.position_digest != b.position_digest
+
+    def test_unchanged_by_zero_information_probe(self):
+        s = Session(hypothesis_ids={"H1", "H2"})
+        before = s.position_digest
+        _probe(s, "P1", set())
+        _probe(s, "P1", {"H1"})  # rejected duplicate
+        s.enter_obligation("O1", 1)
+        assert s.position_digest == before
+        assert s.snapshot().state_hash != before  # seq moved; state hash did not stay put
+
+    def test_order_and_path_independent(self):
+        a = Session(hypothesis_ids={"H1", "H2", "H3", "H4"})
+        b = Session(hypothesis_ids={"H1", "H2", "H3", "H4"})
+        _probe(a, "P1", {"H1"})
+        _probe(a, "P2", {"H2"})
+        _probe(b, "P1", {"H1", "H2"})  # one probe instead of two
+        assert a.position_digest == b.position_digest
+
+    def test_independent_of_universe(self):
+        small = Session(hypothesis_ids={"H1", "H2"})
+        large = Session(hypothesis_ids={"H1", "H2", "H3"})
+        _probe(large, "P", {"H3"})
+        assert small.position_digest == large.position_digest
+
+    def test_matches_module_function_and_survives_recovery(self):
+        store = InMemoryOpLogStore()
+        s = Session(hypothesis_ids={"a", "b", "c"}, store=store)
+        _probe(s, "P", {"b"})
+        assert s.position_digest == compute_position_digest({"a", "c"})
+        assert s.position_digest == compute_position_digest(["c", "a", "a"])
+        assert Session.recover(store, s.session_id).position_digest == s.position_digest
+
+    def test_meet_of_two_positions_is_a_position(self):
+        a = Session(hypothesis_ids={"H1", "H2", "H3"})
+        b = Session(hypothesis_ids={"H1", "H2", "H3"})
+        _probe(a, "P", {"H1"})
+        _probe(b, "P", {"H2"})
+        meet = a.survivors & b.survivors
+        c = Session(hypothesis_ids={"H1", "H2", "H3"})
+        _probe(c, "P", {"H1", "H2"})
+        assert compute_position_digest(meet) == c.position_digest
+
+    def test_in_to_dict_and_empty_position(self):
+        s = Session(hypothesis_ids={"H1"})
+        assert s.snapshot().to_dict()["position_digest"] == s.position_digest
+        _probe(s, "P", {"H1"})
+        assert s.position_digest == compute_position_digest(())

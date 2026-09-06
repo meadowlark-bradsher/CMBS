@@ -27,6 +27,10 @@ the old surface is removed outright rather than deprecated.
   reducer version.
 - `Snapshot`, `OperationSpec`, `OperationEnvelope`, `AppendResult`,
   `compute_state_hash`.
+- `compute_position_digest` and `Snapshot.position_digest` /
+  `Session.position_digest`: a session-independent identity for the
+  survivor set, for convergence checks, zero-information-probe detection,
+  and policy caching across runs.
 - `load_builtin_kit(name)` in both reference adapters
   (`cmbs.adapters.twenty_questions`, `cmbs.adapters.itbench`) — loads
   kit YAMLs via `importlib.resources` so examples and downstream users
@@ -34,6 +38,11 @@ the old surface is removed outright rather than deprecated.
 - `ruff` linter configured in `pyproject.toml`; enforced in CI.
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, GitHub issue
   and pull-request templates.
+- `tutorials/`: six runnable scripts (kernel basics, LLM Twenty Questions,
+  LLM incident triage, two-agent convergence, audit and replay, a
+  file-backed store). The LLM ones drive the investigation with Claude
+  via the `anthropic` SDK when a key is visible and fall back to a
+  scripted policy otherwise. Installed with `pip install 'cmbs[tutorials]'`.
 - Tests: `test_session_invariants.py` (the 49 v0 invariant tests ported
   to `Session`), `test_session_kernel.py` (op log, hashing, retries,
   store SPI, recovery), `test_spi.py`, `test_examples.py`.

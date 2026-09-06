@@ -59,7 +59,8 @@ down what the op-log substrate guarantees underneath it:
 | `TestReducerSemantics`    | 14    | `classify`; unknown ops are no-ops; `assert`/`refine`/`retract`; obligation re-entry rules; termination is idempotent and non-freezing; malformed ops are rejected, not raised |
 | `TestConstruction`        | 8     | Input validation; ontology stored not interpreted; no execution-model terms on any public class |
 | `TestStoreAndRecovery`    | 11    | `InMemoryOpLogStore` conformance; recovery reproduces the full snapshot and continues the same log; wrong reducer version is refused |
-| **Total**                 | **47** |                                                                                     |
+| `TestPositionDigest`      | 8     | `position_digest` equal across sessions with equal survivors; unchanged by zero-information ops; independent of order, path, universe, and session; names the meet of two positions |
+| **Total**                 | **55** |                                                                                     |
 
 ## Cross-component coverage
 
@@ -71,5 +72,6 @@ The remaining tests exercise the layers above the kernel:
 | `test_kits.py`              | 7     | Kit loaders for both reference adapters                  |
 | `test_legacy_adapter.py`    | 5     | `LegacyReplayAdapter`                                    |
 | `test_spi.py`               | 4     | `HypothesisProvider` feeding a `Session`; `discover_providers` |
+| `test_tutorials.py`         | 12    | Every tutorial offline; policy selection; a policy that insists on repeating is refused by the kernel |
 
-Total across all files: **121 tests**.
+Total across all files: **141 tests**.

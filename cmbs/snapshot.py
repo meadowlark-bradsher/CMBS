@@ -9,9 +9,29 @@ point.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
+
+
+def compute_position_digest(survivors: Iterable[str]) -> str:
+    """SHA-256 over the sorted survivor set, and nothing else.
+
+    This names a *position in the belief lattice* independently of which
+    session, log, or reducer produced it. Two sessions with the same
+    survivors have the same digest whatever their IDs, log lengths,
+    obligations, or conclusion history. Compare it to ``state_hash``,
+    which deliberately covers all of those.
+
+    The universe is not included: the digest is the subset, and callers
+    who need "this point in *this* lattice" pair it with the initial
+    hypothesis set.
+    """
+    body = json.dumps(sorted(set(survivors)), separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -81,6 +101,15 @@ class Snapshot:
     def active_obligations(self) -> frozenset[str]:
         return frozenset(o.obligation_id for o in self.obligations)
 
+    @property
+    def position_digest(self) -> str:
+        """Session-independent identity of the current lattice position.
+
+        Equal across sessions with the same survivors; unchanged by an op
+        that eliminates nothing. See :func:`compute_position_digest`.
+        """
+        return compute_position_digest(self.survivors)
+
     def obligation(self, obligation_id: str) -> ObligationEntry | None:
         """Return the active obligation with this ID, or ``None``."""
         for entry in self.obligations:
@@ -93,6 +122,7 @@ class Snapshot:
             "session_id": self.session_id,
             "seq": self.seq,
             "state_hash": self.state_hash,
+            "position_digest": self.position_digest,
             "survivors": sorted(self.survivors),
             "n_survivors": self.n_survivors,
             "entropy": self.entropy,
