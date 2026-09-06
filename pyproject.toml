@@ -42,6 +42,11 @@ dev = [
 ]
 tutorials = [
     "anthropic>=1.0",
+    # httpx2 (the SDK's HTTP layer) uses Brotli's newer decompressor API but
+    # does not require Brotli itself; an older Brotli already present in the
+    # environment breaks response decoding with
+    # "TypeError: process() takes no keyword arguments".
+    "brotli>=1.2; platform_python_implementation == 'CPython'",
 ]
 
 [tool.setuptools.packages.find]

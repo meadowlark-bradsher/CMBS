@@ -35,6 +35,20 @@ LLM tutorials use a scripted policy that picks the first unasked probe. The
 kernel behavior is identical; only the chooser changes. The test suite runs
 every tutorial this way.
 
+## Troubleshooting
+
+**`anthropic.APIConnectionError` with `TypeError: process() takes no keyword
+arguments` underneath.** The request succeeded and the response could not be
+decoded: the SDK's HTTP layer needs Brotli 1.2 or newer, and an older Brotli
+from a conda base or another package is being picked up. Upgrade it:
+
+```bash
+pip install -U 'brotli>=1.2'
+```
+
+The `tutorials` extra pins this, so `pip install -e '.[tutorials]'` from a
+current checkout installs the right version.
+
 ## Writing your own
 
 Copy `_support.py`'s `ProbePolicy` shape: a `choose(...)` that returns a
