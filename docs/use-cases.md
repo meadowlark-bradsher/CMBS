@@ -70,6 +70,8 @@ while not session.is_terminated:
     )
     # result.accepted is False if the LLM tried to repeat itself —
     # the attempt is already in the log; continue without rewriting the prompt.
+    # session.position_digest is unchanged if the probe eliminated nothing —
+    # a zero-information step you may want to count against a budget.
 
     if len(session.survivors) == 1:
         if session.request_obligation_exit("investigate").permitted:
@@ -125,6 +127,11 @@ The `OpLogStore` SPI is the integration point. Agents in one process share a
 store and recover the same session from it; each envelope's `source_id`
 records who contributed it. A network layer on top of the same log is
 additive work that the kernel does not need to know about.
+
+When the agents run separate sessions instead, `position_digest` is the
+cheap convergence check: equal digests mean equal frontiers, with no log
+exchange. The meet of two frontiers is `a.survivors & b.survivors`, and
+`compute_position_digest` names it.
 
 ### Crash recovery and migration between processes
 

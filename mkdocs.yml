@@ -7,6 +7,7 @@ nav:
   - Home: index.md
   - Use Cases: use-cases.md
   - Architecture: architecture.md
+  - Tutorials: tutorials.md
   - Reference:
       - API: reference/api.md
       - Repository Layout: reference/repository.md

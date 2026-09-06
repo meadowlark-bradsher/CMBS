@@ -31,6 +31,7 @@ from .snapshot import (
     ProbeResult,
     Snapshot,
     TerminationResult,
+    compute_position_digest,
 )
 from .spi import HypothesisProvider, discover_providers
 from .store import InMemoryOpLogStore, OpLogStore, RecoveredSession
@@ -49,6 +50,7 @@ __all__ = [
     "Reducer",
     "MaskMeetTombstoneReducer",
     "compute_state_hash",
+    "compute_position_digest",
     # persistence
     "OpLogStore",
     "InMemoryOpLogStore",

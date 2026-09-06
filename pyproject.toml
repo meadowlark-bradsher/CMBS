@@ -40,10 +40,13 @@ dev = [
     "pytest>=7",
     "ruff>=0.6",
 ]
+tutorials = [
+    "anthropic>=1.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["cmbs*"]
-exclude = ["tests*", "examples*", "archive*", "docs*", "docs-site*", "docs-vault*", "docs-snapshots*"]
+exclude = ["tests*", "examples*", "tutorials*", "archive*", "docs*", "docs-site*", "docs-vault*", "docs-snapshots*"]
 
 [tool.setuptools.package-data]
 cmbs = ["adapters/*/kits/*.yaml"]

@@ -18,8 +18,9 @@ cmbs/                       # Source package
     └── itbench/                # ITBench scenarios
         └── kits/               # itb_min_4.yaml, itb_sre_6.yaml
 
-tests/                      # Pytest suite (121 tests)
+tests/                      # Pytest suite (141 tests)
 examples/                   # Runnable demos (run_20q.py, run_itbench.py)
+tutorials/                  # Six runnable tutorials; three drive Claude via the anthropic SDK
 design/                     # ADRs and the kernel comparison behind the current shape
 docs/                       # This documentation tree (mkdocs source)
 ```
@@ -34,12 +35,13 @@ See the [API Reference](api.md) for every symbol.
 | File                               | Tests | Focus                                                                    |
 | ---------------------------------- | ----- | ------------------------------------------------------------------------ |
 | `tests/test_session_invariants.py` | 49    | Authoritative invariant coverage (INV-2, INV-3, INV-5a, INV-6) and boundary properties |
-| `tests/test_session_kernel.py`     | 47    | Op log as audit trail, state hashing, `op_id` retries, reducer semantics beyond the facade, `OpLogStore` conformance, recovery |
+| `tests/test_session_kernel.py`     | 55    | Op log as audit trail, state hashing, position digest, `op_id` retries, reducer semantics beyond the facade, `OpLogStore` conformance, recovery |
+| `tests/test_tutorials.py`          | 12    | Every tutorial end to end with the scripted policy; policy selection; the kernel refusing a repeat the policy insisted on |
 | `tests/test_examples.py`           | 9     | Both examples end to end; replay of an example log to the same snapshot |
 | `tests/test_kits.py`               | 7     | Kit loaders, including YAML `yes`/`no` key normalization                  |
 | `tests/test_legacy_adapter.py`     | 5     | `LegacyReplayAdapter` shim                                               |
 | `tests/test_spi.py`                | 4     | `HypothesisProvider` feeding a `Session`; `discover_providers`           |
-| **Total**                          | **121** |                                                                        |
+| **Total**                          | **141** |                                                                        |
 
 Run the full suite with `pytest -q` (well under a second).
 
@@ -47,7 +49,7 @@ Run the full suite with `pytest -q` (well under a second).
 
 | File                                  | Purpose                                                     |
 | ------------------------------------- | ----------------------------------------------------------- |
-| `pyproject.toml`                      | Packaging metadata (name, version, deps, build system) and `ruff` config |
+| `pyproject.toml`                      | Packaging metadata (name, version, deps, `tutorials` extra, build system) and `ruff` config |
 | `requirements.txt`                    | Runtime dependencies (mirrors `pyproject.toml`)             |
 | `mkdocs.yml`                          | Documentation site config (this tree)                       |
 | `pytest.ini`                          | Pytest configuration                                        |

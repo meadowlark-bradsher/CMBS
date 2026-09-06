@@ -109,6 +109,25 @@ Multiple sessions can share one store. There is no multi-session manager or
 network layer in the package; both are additive on top of the same kernel if
 a use case needs them.
 
+## Two identities
+
+A snapshot carries two hashes that answer different questions.
+
+- **`state_hash`** answers "which position in *this* log?" It covers the
+  full belief content, the reducer version, the session ID, and `seq`. It
+  changes on every append, including rejected ones, and differs across
+  sessions by construction. It is the audit identity.
+- **`position_digest`** answers "which point in the belief lattice?" It
+  covers the sorted survivor set and nothing else. Two sessions with the
+  same survivors share it whatever their history, and an op that eliminates
+  nothing leaves it unchanged. It is the convergence identity.
+
+The lattice reading is deliberate: the belief part of a snapshot is a subset
+of the universe, every elimination is a meet against a mask, and the
+universe is the top element. Obligations, conclusion history, and `attrs`
+are workflow state layered on that lattice, which is why they are in the
+state hash and not the digest.
+
 ## Two kinds of repeat
 
 The `append` API distinguishes two ways an operation can be "the same as
