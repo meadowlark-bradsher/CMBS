@@ -7,7 +7,14 @@ nav:
   - Home: index.md
   - Use Cases: use-cases.md
   - Architecture: architecture.md
-  - Tutorials: tutorials.md
+  - Tutorials:
+      - Overview: tutorials/index.md
+      - 01 Kernel basics: tutorials/01-kernel-basics.md
+      - 02 Twenty Questions: tutorials/02-twenty-questions.md
+      - 03 Incident triage: tutorials/03-incident-triage.md
+      - 04 Two agents: tutorials/04-two-agents.md
+      - 05 Audit and replay: tutorials/05-audit-and-replay.md
+      - 06 File-backed store: tutorials/06-file-backed-store.md
   - Reference:
       - API: reference/api.md
       - Repository Layout: reference/repository.md

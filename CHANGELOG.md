@@ -43,6 +43,8 @@ the old surface is removed outright rather than deprecated.
   file-backed store). The LLM ones drive the investigation with Claude
   via the `anthropic` SDK when a key is visible and fall back to a
   scripted policy otherwise. Installed with `pip install 'cmbs[tutorials]'`.
+- A docs walkthrough page per tutorial under *Tutorials*, with the real
+  output, what to notice, and a link to the source.
 - Tests: `test_session_invariants.py` (the 49 v0 invariant tests ported
   to `Session`), `test_session_kernel.py` (op log, hashing, retries,
   store SPI, recovery), `test_spi.py`, `test_examples.py`.

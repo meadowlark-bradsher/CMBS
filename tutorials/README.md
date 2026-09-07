@@ -1,6 +1,7 @@
 # CMBS tutorials
 
 Six runnable scripts, each one idea. Run them from the repository root.
+Each has a walkthrough page in the docs under *Tutorials*.
 
 | Script | What it shows | Needs an LLM? |
 |---|---|---|
