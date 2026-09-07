@@ -95,7 +95,7 @@ adapter.submit_elimination_event(
 - [Home](docs/index.md) — install, quickstart, and pointers
 - [Use Cases](docs/use-cases.md) — LLM context management and other applications
 - [Architecture](docs/architecture.md) — mechanism vs policy, invariants, layers
-- [Tutorials](docs/tutorials.md) — six runnable scripts, three of them live against Claude
+- [Tutorials](docs/tutorials/index.md) — six runnable scripts, three of them live against Claude
 - [API Reference](docs/reference/api.md) — public surface
 - [Repository Layout](docs/reference/repository.md) — what lives where
 - [Invariant Test Matrix](docs/reference/invariant-test-matrix.md) — what's tested

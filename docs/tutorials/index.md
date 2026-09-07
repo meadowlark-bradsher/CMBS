@@ -1,18 +1,21 @@
 # Tutorials
 
-The [`tutorials/`](https://github.com/meadowlark-bradsher/CMBS/tree/main/tutorials)
-directory holds six runnable scripts, each built around one idea. Three of
-them can drive the investigation with Claude through the official
-`anthropic` SDK; the rest need nothing beyond the package.
+Six runnable scripts, each built around one idea. Three of them can drive
+the investigation with Claude through the official `anthropic` SDK; the
+rest need nothing beyond the package.
 
 | Tutorial | What it shows | LLM |
 |---|---|---|
-| [01 Kernel basics](https://github.com/meadowlark-bradsher/CMBS/blob/main/tutorials/01_kernel_basics.py) | The five facade calls, what the kernel books, what it refuses, and recovery from the store | no |
-| [02 Twenty Questions](https://github.com/meadowlark-bradsher/CMBS/blob/main/tutorials/02_llm_twenty_questions.py) | Claude picks the questions. It is shown every question, asked or not, so INV-3 does the non-repetition work the prompt is not asked to do | optional |
-| [03 Incident triage](https://github.com/meadowlark-bradsher/CMBS/blob/main/tutorials/03_llm_incident_triage.py) | Claude picks the checks. An obligation refuses an early exit and a stability window refuses an early termination | optional |
-| [04 Two agents](https://github.com/meadowlark-bradsher/CMBS/blob/main/tutorials/04_convergence_two_agents.py) | Two sessions with different probe orders. `state_hash` never agrees; `position_digest` agrees when beliefs do, and names the meet when they do not | optional |
-| [05 Audit and replay](https://github.com/meadowlark-bradsher/CMBS/blob/main/tutorials/05_audit_and_replay.py) | A reviewer rebuilds state from a handed-over log with the same reducer, matches the claimed hash, then catches a tampered envelope | no |
-| [06 File-backed store](https://github.com/meadowlark-bradsher/CMBS/blob/main/tutorials/06_file_backed_store.py) | A JSONL `OpLogStore` implementation short enough to read in one sitting; recovery after a simulated restart | no |
+| [01 Kernel basics](01-kernel-basics.md) | The five facade calls, what the kernel books, what it refuses, and recovery from the store | no |
+| [02 Twenty Questions](02-twenty-questions.md) | Claude picks the questions. It is shown every question, asked or not, so INV-3 does the non-repetition work the prompt is not asked to do | optional |
+| [03 Incident triage](03-incident-triage.md) | Claude picks the checks. An obligation refuses an early exit and a stability window refuses an early termination | optional |
+| [04 Two agents](04-two-agents.md) | Two sessions with different probe orders. `state_hash` never agrees; `position_digest` agrees when beliefs do, and names the meet when they do not | optional |
+| [05 Audit and replay](05-audit-and-replay.md) | A reviewer rebuilds state from a handed-over log with the same reducer, matches the claimed hash, then catches a tampered envelope | no |
+| [06 File-backed store](06-file-backed-store.md) | A JSONL `OpLogStore` implementation short enough to read in one sitting; recovery after a simulated restart | no |
+
+Each page walks through its script step by step with the real output, then
+links to the source. The scripts themselves live in
+[`tutorials/`](https://github.com/meadowlark-bradsher/CMBS/tree/main/tutorials).
 
 ## Running live
 
