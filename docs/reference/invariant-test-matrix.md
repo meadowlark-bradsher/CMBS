@@ -54,6 +54,29 @@ The budget rows pin the mechanism-not-policy boundary from the
 reinstatement side: the kernel bounds and refuses, the caller decides
 (37 tests).
 
+## Log integrity invariants (`tests/test_log_hash.py`)
+
+These hold for every envelope `Session.append` writes, under either reducer.
+`log_hash_n = sha256(log_hash_{n-1} || canonical(envelope_n))`, scheme
+`log_hash_v1`; see [`compute_log_hash`](api.md#compute_log_hash).
+
+| ID      | Property                                                                                              | Class                            |
+| ------- | ----------------------------------------------------------------------------------------------------- | -------------------------------- |
+| INV-H1  | Tamper evidence: editing any single field of envelope *n* (parametrized over all nine hashed fields, at three positions) changes `log_hash_n` and every later hash, and `Session.recover` raises `ValueError`; so does rewriting a hash alone, dropping an envelope, or a missing hash after the chain has started | `TestTamperEvidence`             |
+| INV-H2  | Replay determinism: recomputing the chain from the persisted envelopes reproduces it exactly, `created_at` included (it is read from the record, not the clock); a recovered session reports the same head and continues the chain; a `provenance` edit moves `log_hash` but not `state_hash`, and `state_hash` stays on the snapshot and `AppendResult` | `TestReplayDeterminism`          |
+
+`TestScheme` pins the scheme itself: genesis link, each link covering the
+previous hash, canonical bytes as sorted-key compact UTF-8 JSON excluding the
+hash field, and the stored scheme identifier. `TestLegacy` covers logs whose
+envelopes carry `log_hash = None`: an all-legacy log loads with
+`unverified_prefix` equal to its length, a legacy prefix followed by a
+hashed tail verifies the tail, edits inside the prefix are (by design) not
+detected, a session recovered from a legacy log starts its chain from
+genesis, and a store written against the five-argument `create_session`
+still works. `TestSerialization` round-trips `to_dict()`. One test records
+the scheme's limit: a consistent rewrite of a whole suffix passes the chain
+but cannot keep the head hash. 68 tests.
+
 ## Boundary properties
 
 Beyond the numbered invariants, the suite asserts the architectural boundary
@@ -115,5 +138,6 @@ The remaining tests exercise the layers above the kernel:
 | `test_tutorials.py`         | 12    | Every tutorial offline; policy selection; a policy that insists on repeating is refused by the kernel |
 | `test_reinstate.py`         | 54    | `ReinstatingMaskReducer`: INV-R1–R4, INV-O1–O2, the pinned v1 hash, the version registry, a random-sequence property test |
 | `test_view_and_budget.py`   | 37    | The bounded view, the reinstatement budget, and `weight` / `reason`: INV-B1–B4, INV-V1–V2, INV-W1 |
+| `test_log_hash.py`          | 68    | The `log_hash` chain: INV-H1–H2, the scheme definition, legacy logs and stores, `to_dict` round-trips |
 
-Total across all files: **234 tests**.
+Total across all files: **302 tests**.

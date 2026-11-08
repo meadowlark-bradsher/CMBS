@@ -131,18 +131,29 @@ Multiple sessions can share one store. There is no multi-session manager or
 network layer in the package; both are additive on top of the same kernel if
 a use case needs them.
 
-## Two identities
+## Three identities
 
-A snapshot carries two hashes that answer different questions.
+A session carries three hashes that answer different questions. Two live on
+the snapshot; the third lives on each envelope.
 
 - **`state_hash`** answers "which position in *this* log?" It covers the
   full belief content, the reducer version, the session ID, and `seq`. It
   changes on every append, including rejected ones, and differs across
-  sessions by construction. It is the audit identity.
+  sessions by construction. It is the audit identity of the *state*: it
+  covers what the reducer projects and nothing else, so a field the reducer
+  ignores (`provenance`, say) can change without moving it, and it does
+  not chain.
 - **`position_digest`** answers "which point in the belief lattice?" It
   covers the sorted survivor set and nothing else. Two sessions with the
   same survivors share it whatever their history, and an op that eliminates
   nothing leaves it unchanged. It is the convergence identity.
+- **`log_hash`** answers "is this the log that was written?" Each envelope's
+  hash is the SHA-256 of the previous envelope's hash and its own canonical
+  bytes, every stored field included, so an edit to any field of any
+  envelope changes that hash and every later one. `Session.append` computes
+  it and `Session.recover` recomputes and checks it before replaying. It is
+  the integrity identity of the *record*. A log written before the chain
+  existed loads with its unhashed prefix reported as unverified.
 
 The lattice reading is deliberate: the belief part of a snapshot is a subset
 of the universe, every elimination is a meet against a mask, and the

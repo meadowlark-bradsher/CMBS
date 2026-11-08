@@ -51,6 +51,11 @@ whole class is about forty lines, and because `OpLogStore` is a
 runtime-checkable protocol, the script asserts `isinstance(store,
 OpLogStore)` before using it.
 
+The store was written against the five-argument `create_session` and is
+left that way on purpose: the kernel passes the newer `log_hash_scheme`
+keyword only to stores that accept one, so this class keeps working
+unchanged.
+
 ### 1. Write a session through the file store
 
 ```python
@@ -93,6 +98,13 @@ A brand-new store object pointed at the same directory, and a session
 rebuilt from the file. The open obligation came back with it, as did the
 ontology and the stability window from the header line.
 
+Recovery also checked the file's integrity before replaying. Each envelope
+reached the store with its chained `log_hash` set, and `to_dict()` wrote it
+to the row, so `Session.recover` recomputed every hash from the row's other
+fields and the previous link and compared. Edit any field of any line in
+the JSONL by hand and recovery raises `ValueError` naming the sequence
+number. The store did nothing for this; it only kept the bytes.
+
 ### 3. The recovered session keeps writing the same file
 
 ```
@@ -109,7 +121,9 @@ next sequence number.
 ## What to notice
 
 - **The store never interprets anything.** It serializes envelopes and
-  session metadata and hands them back. All meaning lives in the reducer.
+  session metadata and hands them back. All meaning lives in the reducer,
+  and the integrity check lives in the kernel: a store that round-trips
+  `to_dict()` gets chain verification for free.
 - **Contiguous sequence numbers are the one invariant a store must
   hold.** The in-memory store checks it and so does this one. A store
   that accepted a gap would let recovery silently skip an operation.

@@ -16,12 +16,20 @@ for the rationale behind this shape.
 from __future__ import annotations
 
 import copy
+import inspect
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import replace
 from typing import Any
 
-from .operations import AppendResult, OperationEnvelope, OperationSpec
+from .operations import (
+    LOG_HASH_SCHEME,
+    AppendResult,
+    OperationEnvelope,
+    OperationSpec,
+    compute_log_hash,
+)
 from .reducer import KIND_REINSTATEMENT, MaskMeetTombstoneReducer, Reducer, reducer_for_version
 from .snapshot import (
     ClosedObligation,
@@ -49,6 +57,10 @@ class Session:
     The session is the single writer to its log. It keeps the current
     snapshot cached and advances it one ``apply`` step per append; the
     cached snapshot is always equal to a full ``reduce`` of the log.
+
+    It is also the only place envelopes are built, so it is where each
+    envelope's chained ``log_hash`` is computed (the reducer never
+    constructs envelopes). ``recover`` verifies that chain before replay.
     """
 
     def __init__(
@@ -93,17 +105,30 @@ class Session:
         self._reducer: Reducer = reducer if reducer is not None else MaskMeetTombstoneReducer()
         self._store: OpLogStore = store if store is not None else InMemoryOpLogStore()
 
-        self._store.create_session(
-            self._session_id,
-            universe,
-            ontology,
-            stability_window,
-            self._reducer.version,
-        )
+        create = self._store.create_session
+        if _accepts_keyword(create, "log_hash_scheme"):
+            create(
+                self._session_id,
+                universe,
+                ontology,
+                stability_window,
+                self._reducer.version,
+                log_hash_scheme=LOG_HASH_SCHEME,
+            )
+        else:  # a store written against the five-argument SPI
+            create(
+                self._session_id,
+                universe,
+                ontology,
+                stability_window,
+                self._reducer.version,
+            )
         self._snapshot: Snapshot = self._reducer.initial(
             self._session_id, universe, stability_window=stability_window
         )
         self._op_ids: set[str] = set()
+        self._head_log_hash: str | None = None
+        self._unverified_prefix: int = 0
 
     # ------------------------------------------------------------------
     # Imperative facade — common cases
@@ -353,6 +378,12 @@ class Session:
         - An ``idempotency_key`` already consumed by an accepted op is a
           domain-level repeat (INV-3). A new, *rejected* envelope is
           appended so the attempt is auditable.
+
+        The envelope's ``log_hash`` is ``sha256(previous_log_hash ||
+        canonical(envelope))`` (see :func:`cmbs.compute_log_hash`), where
+        the previous link is the last envelope's hash or the genesis
+        constant for the first. ``created_at`` is wall-clock at append and
+        is stored on the record, so the chain replays deterministically.
         """
         if not isinstance(spec, OperationSpec):
             raise TypeError("append expects an OperationSpec")
@@ -374,9 +405,11 @@ class Session:
             rejected_reason=reason,
             created_at=time.time(),
         )
+        envelope = replace(envelope, log_hash=compute_log_hash(self._head_log_hash, envelope))
         self._store.append(self._session_id, envelope)
         self._snapshot = self._reducer.apply(self._snapshot, envelope)
         self._op_ids.add(envelope.op_id)
+        self._head_log_hash = envelope.log_hash
         return AppendResult(
             envelope=envelope,
             state_hash_after=self._snapshot.state_hash,
@@ -474,6 +507,22 @@ class Session:
         """Seq of the last envelope in the log (0 if empty)."""
         return self._snapshot.seq
 
+    @property
+    def head_log_hash(self) -> str | None:
+        """``log_hash`` of the last envelope: the link the next append will
+        chain from. ``None`` if the log is empty or its last envelope is a
+        legacy one without a hash (the next append then chains from the
+        genesis constant)."""
+        return self._head_log_hash
+
+    @property
+    def unverified_prefix(self) -> int:
+        """Number of leading legacy envelopes (``log_hash is None``) that
+        :meth:`recover` accepted without chain verification. ``0`` for a
+        session created in this process or recovered from a fully hashed
+        log. Verification covers every envelope after this prefix."""
+        return self._unverified_prefix
+
     def snapshot(self) -> Snapshot:
         """Return an immutable view of the current state."""
         return self._snapshot
@@ -524,6 +573,16 @@ class Session:
         (``ValueError`` if none is registered). Replaying under a different
         version would silently change meaning, so an explicit ``reducer``
         whose version does not match raises ``ValueError``.
+
+        The envelope hash chain is verified before replay: each
+        ``log_hash`` is recomputed from the envelope's canonical bytes and
+        the previous link, and a mismatch raises ``ValueError`` naming the
+        seq. A leading run of legacy envelopes with ``log_hash = None`` is
+        accepted unverified and counted in :attr:`unverified_prefix`;
+        verification starts at the first hashed envelope, which must chain
+        from the genesis constant. A missing hash after a hashed envelope
+        is a broken chain and also raises. A ``log_hash_scheme`` the kernel
+        does not implement raises ``ValueError``.
         """
         record = store.recover(session_id)
         active: Reducer = (
@@ -534,6 +593,13 @@ class Session:
                 f"Session {session_id!r} was written under reducer "
                 f"{record.reducer_version!r}; cannot replay under {active.version!r}."
             )
+        scheme = getattr(record, "log_hash_scheme", LOG_HASH_SCHEME)
+        if scheme != LOG_HASH_SCHEME:
+            raise ValueError(
+                f"Session {session_id!r} was written under log hash scheme "
+                f"{scheme!r}; this kernel verifies {LOG_HASH_SCHEME!r} only."
+            )
+        unverified, head = _verify_log_hash_chain(session_id, record.envelopes)
 
         session = cls.__new__(cls)
         session._session_id = record.session_id
@@ -549,4 +615,51 @@ class Session:
             stability_window=record.stability_window,
         )
         session._op_ids = {envelope.op_id for envelope in record.envelopes}
+        session._head_log_hash = head
+        session._unverified_prefix = unverified
         return session
+
+
+def _verify_log_hash_chain(
+    session_id: str, envelopes: tuple[OperationEnvelope, ...]
+) -> tuple[int, str | None]:
+    """Check the chain over ``envelopes``.
+
+    Returns ``(unverified_prefix, head_log_hash)``. Raises ``ValueError``
+    on the first envelope whose stored hash differs from the recomputed
+    one, or that lacks a hash after the chain has started.
+    """
+    unverified = 0
+    for envelope in envelopes:
+        if envelope.log_hash is not None:
+            break
+        unverified += 1
+    previous: str | None = None
+    for envelope in envelopes[unverified:]:
+        if envelope.log_hash is None:
+            raise ValueError(
+                f"Session {session_id!r}: envelope seq {envelope.seq} has no log_hash "
+                f"after a hashed envelope; the chain is broken."
+            )
+        expected = compute_log_hash(previous, envelope)
+        if envelope.log_hash != expected:
+            raise ValueError(
+                f"Session {session_id!r}: log_hash mismatch at seq {envelope.seq}; "
+                f"the envelope or an earlier one was altered after it was written."
+            )
+        previous = envelope.log_hash
+    return unverified, previous
+
+
+def _accepts_keyword(fn: Callable[..., object], name: str) -> bool:
+    """Whether ``fn`` can be called with keyword ``name``."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):  # pragma: no cover - builtins, C extensions
+        return False
+    if name in params:
+        return params[name].kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
