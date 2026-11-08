@@ -36,6 +36,14 @@ The consequences:
 The `Session` keeps its current snapshot cached and advances it one step per
 append; the cached value is always equal to a full reduction of the log.
 
+The full snapshot lists every survivor and, under `ReinstatingMaskReducer`,
+every recorded pair, so it grows with the universe and the log.
+`Session.view(k)` is the bounded alternative for a model-facing caller:
+counts, the position digest, open obligations with their progress, the
+closed-obligation records, and the last `k` envelopes reduced to their
+verdicts. It is a pure function of the snapshot and those `k` envelopes, and
+it never carries the survivor list.
+
 ## Kernel responsibilities
 
 - Track the current set of surviving hypotheses
@@ -58,6 +66,12 @@ append; the cached value is always equal to a full reduction of the log.
 - Maintain probabilistic beliefs or confidence scores
 - Auto-terminate based on entropy or singleton survivors
 - Freeze the session after termination (later operations still apply)
+- Decide that an elimination was wrong, or trigger a reinstatement. Under
+  `ReinstatingMaskReducer` the kernel can *bound* reinstatement (a cap on
+  accepted `reinstate` ops, a cap on voided pairs, a caller-supplied
+  `retractable` predicate over the recorded `weight`) and refuses attempts
+  past the bound with a logged reason, but it never issues a `reinstate`
+  itself and never reads a `weight` or `reason` for any other purpose
 
 All of the above are adapter concerns.
 

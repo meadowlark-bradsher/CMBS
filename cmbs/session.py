@@ -19,6 +19,7 @@ import copy
 import time
 import uuid
 from collections.abc import Iterable
+from typing import Any
 
 from .operations import AppendResult, OperationEnvelope, OperationSpec
 from .reducer import KIND_REINSTATEMENT, MaskMeetTombstoneReducer, Reducer, reducer_for_version
@@ -116,6 +117,8 @@ class Session:
         *,
         source_id: str = "",
         provenance: dict | None = None,
+        weight: float | None = None,
+        reason: str | None = None,
     ) -> ProbeResult:
         """Submit a probe outcome.
 
@@ -125,6 +128,14 @@ class Session:
         ``idempotency_key`` — re-submission of the same ``probe_id`` is
         rejected by the reducer and logged as a rejected envelope, with
         no state change (INV-3 enforcement).
+
+        ``weight`` and ``reason`` are copied into the payload when given
+        and omitted otherwise, so existing envelopes are unchanged. The
+        kernel never interprets either: ``reason`` is provenance, and
+        ``weight`` is recorded by ``ReinstatingMaskReducer`` as
+        ``Snapshot.weights[seq]`` solely so that a reinstatement budget's
+        ``retractable`` predicate can read it. Under that reducer a
+        non-numeric ``weight`` or a non-string ``reason`` is rejected.
 
         Empty ``eliminated`` is recorded normally; the envelope enters
         the audit log with ``eliminate=[]``, and any active obligation
@@ -140,6 +151,10 @@ class Session:
         }
         if provenance is not None:
             payload["provenance"] = dict(provenance)
+        if weight is not None:
+            payload["weight"] = weight
+        if reason is not None:
+            payload["reason"] = reason
 
         before = self._snapshot
         result = self.append(
@@ -462,6 +477,25 @@ class Session:
     def snapshot(self) -> Snapshot:
         """Return an immutable view of the current state."""
         return self._snapshot
+
+    def view(self, k: int = 5) -> dict[str, Any]:
+        """A bounded, JSON-serializable summary of the current state for
+        a model-facing caller: counts, the position digest, obligations
+        with progress, closed-obligation records, and the last ``k``
+        envelopes as ``seq`` / ``op_type`` / ``accepted`` /
+        ``rejected_reason``. Never the survivor list. Equal to
+        ``snapshot().view(k, recent=operations()[-k:])``; the envelopes
+        are read from the store here. See :meth:`Snapshot.view`.
+        """
+        if isinstance(k, bool) or not isinstance(k, int):
+            raise TypeError("k must be an int")
+        if k < 0:
+            raise ValueError("k must be >= 0")
+        head = self._snapshot.seq
+        recent: tuple[OperationEnvelope, ...] = ()
+        if k and head:
+            recent = self._store.read_ops(self._session_id, max(1, head - k + 1), head)
+        return self._snapshot.view(k, recent=recent)
 
     def operations(
         self,

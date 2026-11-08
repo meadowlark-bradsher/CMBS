@@ -62,6 +62,39 @@ the old surface is removed outright rather than deprecated.
   `registered_reducer_versions`. `Session.recover` picks the reducer from
   the stored version when none is passed, and raises `ValueError` for an
   unregistered version.
+- `Snapshot.view(k=5, recent=())` and `Session.view(k=5)`: a
+  JSON-serializable, model-facing summary whose size does not grow with
+  the log. Survivor count, entropy, position digest, open obligations with
+  declared semantics and current progress, the closed-obligation records,
+  the numbers of in-force and reinstated pairs, and the last `k` envelopes
+  as `seq` / `op_type` / `accepted` / `rejected_reason`. Never the survivor
+  list. A pure function of the snapshot plus those `k` envelopes, which
+  `Session.view` reads from the store.
+- A reinstatement budget on `ReinstatingMaskReducer`, set by constructor:
+  `max_reinstates` (accepted `reinstate` ops over the session),
+  `max_reinstated_pairs` (voided pairs), and a `retractable(recorded)`
+  predicate called with the target elimination's `seq` and recorded
+  `weight`. A `reinstate` past a cap or refused by the predicate is
+  rejected with a reason naming the limit and logged like any other
+  rejection. The reducer enforces the bound; it never decides to
+  reinstate. The budget acts in `check` only, so the `version` string is
+  unchanged and a budgeted log replays identically under the default
+  reducer. It is not stored with the session: `reducer_for_version` and
+  `Session.recover(..., reducer=None)` yield the unbudgeted reducer, and a
+  budgeted one is passed to `recover` explicitly. `reducer.budgeted`
+  reports whether any limit is set.
+- Optional `weight` (a real number) and `reason` (a string) on elimination
+  payloads, accepted as keyword arguments by `submit_probe_result` and
+  copied into the payload only when given. The kernel never interprets
+  either. Under `ReinstatingMaskReducer` a malformed one is rejected with a
+  reason, and an accepted `weight` is recorded as `Snapshot.weights[seq]`
+  (only when the envelope asserted at least one hypothesis) so the budget
+  predicate can read it; `reason` stays in the envelope payload.
+  `Snapshot.reinstate_count` counts accepted `reinstate` envelopes. Both
+  new fields default to empty and enter the state hash only when
+  populated, so v1 hashes are still byte-identical.
+- `tests/test_view_and_budget.py`: the namespaced invariants INV-B1–B4,
+  INV-V1–V2, and INV-W1.
 - `tests/test_reinstate.py`: the namespaced invariants INV-R1–R4 and
   INV-O1–O2, a pinned v1 hash, recovery through the registry, and a
   seeded random-sequence property test. INV-5a's monotonicity test now

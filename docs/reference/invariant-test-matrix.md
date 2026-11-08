@@ -35,6 +35,25 @@ seeded random-sequence property test (`TestVocabulary`,
 `TestHashingReplayRecovery`, `test_random_sequences_keep_the_invariants`;
 54 tests).
 
+## Budget, view, and weight invariants (`tests/test_view_and_budget.py`)
+
+These also hold under `ReinstatingMaskReducer` and are namespaced until
+given numbered slots.
+
+| ID      | Property                                                                                              | Class                            |
+| ------- | ----------------------------------------------------------------------------------------------------- | -------------------------------- |
+| INV-B1  | With `max_reinstates=n`, the (n+1)-th `reinstate` is rejected with a reason and logged; state is unchanged; rejected reinstates never consume budget | `TestBudgetEnforcement`          |
+| INV-B2  | With `max_reinstated_pairs=m`, a `reinstate` that would take `\|reinstated_pairs\|` past `m` is rejected whole; re-eliminating a reinstated hypothesis frees nothing | `TestBudgetEnforcement`          |
+| INV-B3  | With `retractable` given, a `reinstate` the predicate refuses is rejected and logged; the predicate sees only what the snapshot recorded (`seq`, and `weight` when given), and only after the target is valid | `TestRetractablePredicate`       |
+| INV-B4  | The budget acts in `check` only: a budgeted log replays to the same snapshot under the unbudgeted default; the version string is unchanged; recovery through the registry drops the budget and an explicit budgeted reducer keeps it | `TestBudgetConstruction`, `TestBudgetReplayAndRecovery` |
+| INV-V1  | `view(k)` carries no survivor list; its size is bounded by `k` and the number of obligations, not by log length | `TestView`                       |
+| INV-V2  | `view(k)` is a pure function of the snapshot and the last `k` envelopes; `Session.view` equals `snapshot().view(k, recent=operations()[-k:])`, before and after recovery | `TestView`                       |
+| INV-W1  | `weight` is recorded iff given and the envelope asserted something; it never changes what is eliminated; `reason` stays in the payload only; v1 stores both and reads neither | `TestWeightAndReason`            |
+
+The budget rows pin the mechanism-not-policy boundary from the
+reinstatement side: the kernel bounds and refuses, the caller decides
+(37 tests).
+
 ## Boundary properties
 
 Beyond the numbered invariants, the suite asserts the architectural boundary
@@ -95,5 +114,6 @@ The remaining tests exercise the layers above the kernel:
 | `test_spi.py`               | 4     | `HypothesisProvider` feeding a `Session`; `discover_providers` |
 | `test_tutorials.py`         | 12    | Every tutorial offline; policy selection; a policy that insists on repeating is refused by the kernel |
 | `test_reinstate.py`         | 54    | `ReinstatingMaskReducer`: INV-R1–R4, INV-O1–O2, the pinned v1 hash, the version registry, a random-sequence property test |
+| `test_view_and_budget.py`   | 37    | The bounded view, the reinstatement budget, and `weight` / `reason`: INV-B1–B4, INV-V1–V2, INV-W1 |
 
-Total across all files: **197 tests**.
+Total across all files: **234 tests**.

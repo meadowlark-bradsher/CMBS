@@ -39,7 +39,7 @@ session = Session(
 | ------------------ | --------------------------- | ----------------------------- | ------------------------------------------------------------ |
 | `hypothesis_ids`   | `Iterable[str]`             | required                      | Initial universe. Any iterable of strings; duplicates collapse |
 | `ontology`         | `OntologyBundle \| None`    | `None`                        | Stored for audit, never interpreted                          |
-| `reducer`          | `Reducer \| None`           | `MaskMeetTombstoneReducer()`  | The fold from log to snapshot. Pass `ReinstatingMaskReducer()` to allow eliminations to be reinstated |
+| `reducer`          | `Reducer \| None`           | `MaskMeetTombstoneReducer()`  | The fold from log to snapshot. Pass `ReinstatingMaskReducer()` to allow eliminations to be reinstated, optionally with a [reinstatement budget](#reinstatement-budget) |
 | `store`            | `OpLogStore \| None`        | `InMemoryOpLogStore()`        | Where envelopes are persisted                                |
 | `stability_window` | `int`                       | `0`                           | INV-2 gate; must be `>= 0`                                   |
 | `session_id`       | `str \| None`               | `None`                        | A UUID is generated if omitted                               |
@@ -48,7 +48,7 @@ session = Session(
 
 | Method                                                                                   | Returns                | Notes                                                                           |
 | ---------------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------- |
-| `submit_probe_result(probe_id, observable_id, eliminated, *, source_id="", provenance=None)` | `ProbeResult`     | Appends a `probe_result` op keyed by `probe_id`. A repeated `probe_id` is rejected and logged (INV-3) |
+| `submit_probe_result(probe_id, observable_id, eliminated, *, source_id="", provenance=None, weight=None, reason=None)` | `ProbeResult`     | Appends a `probe_result` op keyed by `probe_id`. A repeated `probe_id` is rejected and logged (INV-3). `weight` (a number) and `reason` (a string) are copied into the payload when given; see [Op types](#op-types-understood-by-the-shipped-reducers) |
 | `enter_obligation(obligation_id, min_eliminations=1, *, semantics=None, source_id="")`   | `AppendResult`         | Adapter-initiated; rejected if `obligation_id` is already open. `semantics` is `"gross"` or `"net"`; meaningful only under `ReinstatingMaskReducer`, where `"net"` is the default |
 | `request_obligation_exit(obligation_id, *, source_id="")`                                | `ObligationExitResult` | Permitted only after `min_eliminations` of progress within scope (INV-6)        |
 | `declare_conclusion(conclusion_id, *, source_id="")`                                     | `AppendResult`         | Recorded for stability tracking                                                 |
@@ -57,7 +57,10 @@ session = Session(
 | `reinstate_probe(probe_id, hypotheses=None, *, reason=None, source_id="")`               | `ReinstateResult`      | Same, naming the envelope by the `probe_id` it consumed. The probe ID stays consumed |
 
 `source_id`, `provenance`, and `reason` are opaque provenance copied onto the
-envelope.
+envelope. `weight` is opaque too, with one exception: `ReinstatingMaskReducer`
+records it on the snapshot so a reinstatement budget's `retractable`
+predicate can read it. The kernel itself never compares, sums, or thresholds
+a weight.
 
 ### Lower-level append
 
@@ -90,6 +93,7 @@ Two dedupe rules apply, with different meanings:
 | `initial_hypotheses`                 | `frozenset[str]`                  | The universe the session was created with                          |
 | `ontology`, `stability_window`, `reducer` |                              | Construction parameters, read back                                 |
 | `snapshot()`                         | `Snapshot`                        | Immutable view of the current state                                |
+| `view(k=5)`                          | `dict[str, Any]`                  | Bounded, JSON-serializable summary for a model-facing caller; see [`Snapshot.view`](#snapshotview) |
 | `operations(from_seq=None, to_seq=None)` | `tuple[OperationEnvelope, ...]` | Envelopes in an inclusive, 1-indexed seq range                   |
 
 ### Recovery
@@ -103,6 +107,18 @@ the reducer registered for the stored version is used (see
 [`reducer_for_version`](#reducer)). Raises `KeyError` if the store does not
 know the session, and `ValueError` if no reducer is registered for the
 stored version or an explicit `reducer.version` differs from it.
+
+The registry returns a reducer in its default configuration. A
+[reinstatement budget](#reinstatement-budget) is a constructor parameter,
+not part of the version string and not stored with the session, so a
+session recovered with `reducer=None` has **no** budget even if the original
+had one. The log replays to the same snapshot either way, because the budget
+only decides acceptance and the verdicts are already on the envelopes. To
+keep enforcing a budget after recovery, pass the budgeted reducer:
+
+```python
+recovered = Session.recover(store, session_id, reducer=ReinstatingMaskReducer(max_reinstates=3))
+```
 
 ## Snapshot
 
@@ -126,13 +142,41 @@ returned by `Session.snapshot()`.
 | `reinstated_pairs`    | `frozenset[tuple[int, str]]`     | The subset of `asserted_pairs` voided by `reinstate`     |
 | `key_seqs`            | `dict[str, int]`                 | Idempotency key → seq of the accepted envelope that consumed it |
 | `closed_obligations`  | `tuple[ClosedObligation, ...]`   | Frozen records of successful exits                       |
+| `weights`             | `dict[int, float]`               | Seq of an accepted elimination → the `weight` its payload carried. An entry exists only when a weight was given and the envelope asserted at least one hypothesis. Read by a budget's `retractable` predicate, never by the kernel |
+| `reinstate_count`     | `int`                            | Accepted `reinstate` envelopes so far; what `max_reinstates` is checked against |
 
 Derived: `n_survivors`, `entropy`, `active_obligations`, `position_digest`,
 `in_force_pairs`, `obligation(obligation_id) -> ObligationEntry | None`,
 `obligation_progress(obligation_id) -> int | None`, `killers(hypothesis_id)
 -> frozenset[int]` (seqs of in-force envelopes holding it dead),
-`asserted_dead(seq) -> frozenset[str]`, and `to_dict()` for a
-JSON-serializable form.
+`asserted_dead(seq) -> frozenset[str]`, `to_dict()` for a JSON-serializable
+form of everything, and `view(k, recent)` for a bounded one.
+
+### `Snapshot.view`
+
+```python
+snapshot.view(k: int = 5, recent: Sequence[OperationEnvelope] = ()) -> dict[str, Any]
+session.view(k: int = 5) -> dict[str, Any]
+```
+
+A JSON-serializable summary whose size does not grow with the log, meant to
+be handed to a model or an operator in place of `to_dict()`. It never
+includes the survivor list, the eliminated list, or the pair sets. Keys:
+
+| Key                  | Value                                                                 |
+| -------------------- | --------------------------------------------------------------------- |
+| `session_id`, `seq`, `state_hash`, `position_digest` | As on the snapshot                                   |
+| `n_survivors`, `entropy`, `terminated` | As on the snapshot                                                   |
+| `obligations`        | One entry per open obligation: `obligation_id`, `semantics`, `min_eliminations`, `progress` under the declared semantics |
+| `closed_obligations` | The `ClosedObligation` records, as in `to_dict()`                     |
+| `n_in_force_pairs`, `n_reinstated_pairs`, `reinstate_count` | Counts; all `0` under `MaskMeetTombstoneReducer` |
+| `recent`             | The last `k` envelopes, each reduced to `seq`, `op_type`, `accepted`, `rejected_reason` |
+
+`Snapshot.view` is a pure function of the snapshot and `recent`; the snapshot
+holds no envelopes, so the caller supplies them, and only the last `k` of
+whatever is passed are used. `Session.view(k)` reads the last `k` envelopes
+from the store and is equal to `snapshot().view(k, recent=operations()[-k:])`.
+`k=0` yields an empty `recent`; a negative `k` raises `ValueError`.
 
 `ObligationEntry` has `obligation_id`, `min_eliminations`,
 `eliminations_in_scope`, and, under `ReinstatingMaskReducer`, `open_seq`,
@@ -180,11 +224,11 @@ class AppendResult:
 
 | `op_type`              | Payload                                              | Effect when accepted                                                       |
 | ---------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| `probe_result`         | `observable_id`, `eliminate: [ids]`, optional `provenance` | Removes `eliminate ∩ survivors`. The facade sets `idempotency_key=probe_id` |
+| `probe_result`         | `observable_id`, `eliminate: [ids]`, optional `provenance`, `weight`, `reason` | Removes `eliminate ∩ survivors`. The facade sets `idempotency_key=probe_id`. `weight` (a real number) and `reason` (a string) are optional on every elimination op; under v2 a malformed one is rejected with a reason, and an accepted `weight` is recorded as `Snapshot.weights[seq]`. Neither changes what is eliminated |
 | `retract`, `tombstone` | `eliminate: [ids]`                                   | **v1 only:** same elimination, no facade. Retired under `ReinstatingMaskReducer`, which rejects them with a reason |
 | `assert`, `oracle_answer` | `eliminate: [ids]`, `set: {attr: value}`          | Elimination plus writes into `Snapshot.attrs`                              |
 | `refine`               | `if_attr`, `equals`, `eliminate: [ids]`              | Elimination only if `attrs[if_attr] == equals`                             |
-| `reinstate`            | `seq` or `probe_id`, optional `hypotheses: [ids]`, optional `reason` | **v2 only:** voids the in-force eliminations of that one accepted elimination envelope, or only the named subset. Rejected if the target is not an accepted elimination, is out of range, is already reinstated, or the subset names a hypothesis it never asserted |
+| `reinstate`            | `seq` or `probe_id`, optional `hypotheses: [ids]`, optional `reason` | **v2 only:** voids the in-force eliminations of that one accepted elimination envelope, or only the named subset. Rejected if the target is not an accepted elimination, is out of range, is already reinstated, the subset names a hypothesis it never asserted, or the reducer's [reinstatement budget](#reinstatement-budget) refuses it |
 | `enter_obligation`     | `obligation_id`, `min_eliminations`, optional `semantics` | Opens an obligation; rejected if already open or `min_eliminations < 0`. `semantics` (`"gross"` or `"net"`, default `"net"`) is read by v2 only |
 | `exit_obligation`      | `obligation_id`                                      | Closes it; rejected if not open or under threshold (INV-6)                 |
 | `declare_conclusion`   | `conclusion_id`                                      | Appends to `conclusion_history`                                            |
@@ -237,9 +281,51 @@ on recovery.
 
 Reducers are looked up by version through a registry:
 `register_reducer(cls)` (a class decorator) adds one,
-`reducer_for_version(version)` instantiates it or raises `ValueError`, and
-`registered_reducer_versions()` lists the known versions. `Session.recover`
-uses the registry when no reducer is passed.
+`reducer_for_version(version)` instantiates it with default configuration
+or raises `ValueError`, and `registered_reducer_versions()` lists the known
+versions. `Session.recover` uses the registry when no reducer is passed.
+
+### Reinstatement budget
+
+```python
+ReinstatingMaskReducer(
+    *,
+    max_reinstates: int | None = None,          # cap on accepted reinstate ops
+    max_reinstated_pairs: int | None = None,    # cap on |reinstated_pairs|
+    retractable: Callable[[Mapping[str, Any]], bool] | None = None,
+)
+```
+
+All three default to unlimited. When set, `check` applies them to a
+`reinstate` that is otherwise acceptable, in this order:
+
+1. `max_reinstates`: rejected if `snapshot.reinstate_count` has reached the
+   cap. Rejected reinstates never count.
+2. `max_reinstated_pairs`: rejected if voiding the requested pairs would take
+   `|reinstated_pairs|` past the cap. The op is rejected whole; no partial
+   voiding. The record set is monotone, so a pair stays counted even if its
+   hypothesis is later eliminated again.
+3. `retractable`: called with what the snapshot recorded about the target
+   elimination envelope, a mapping holding `"seq"` and, when the envelope
+   carried one, `"weight"`. Returning `False` rejects the op. The predicate
+   must be total: an exception propagates out of `append` and nothing is
+   logged.
+
+A refused `reinstate` is logged as a rejected envelope with a reason naming
+the limit, exactly like any other rejection, and leaves the snapshot
+unchanged apart from `seq`.
+
+The budget is **mechanism, not policy**: the reducer bounds how much
+reinstatement a log may contain, and refuses attempts past the bound, but it
+never decides to reinstate anything. Deciding when a prior elimination was
+wrong remains the caller's, and the kernel has no trigger for it. The
+limits act only in `check`; `apply` is the same fold whatever they are, so a
+log written under a budgeted reducer replays to the same snapshot under the
+unbudgeted default and the `version` string is unchanged. Consequently the
+budget is not stored with the session: `reducer_for_version` and
+`Session.recover(..., reducer=None)` return the unbudgeted reducer, and a
+caller who wants the limits kept passes the budgeted instance to `recover`.
+`reducer.budgeted` reports whether any limit is set.
 
 ### `compute_state_hash`
 
@@ -255,10 +341,11 @@ describe the same belief at the same position of the same session under the
 same reducer.
 
 The fields only `ReinstatingMaskReducer` populates (`asserted_pairs`,
-`reinstated_pairs`, `key_seqs`, `closed_obligations`, and an obligation's
-`open_seq` / `semantics` / `dead_at_open`) enter the hashed content only when
-non-empty, so hashes computed under `MaskMeetTombstoneReducer` are
-byte-identical to those of earlier releases.
+`reinstated_pairs`, `key_seqs`, `closed_obligations`, `weights`,
+`reinstate_count`, and an obligation's `open_seq` / `semantics` /
+`dead_at_open`) enter the hashed content only when non-empty, so hashes
+computed under `MaskMeetTombstoneReducer` are byte-identical to those of
+earlier releases.
 
 ### `compute_position_digest`
 

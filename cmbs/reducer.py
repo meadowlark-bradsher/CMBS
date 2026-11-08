@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from typing import Any, Protocol, runtime_checkable
 
@@ -156,6 +156,10 @@ def compute_state_hash(snapshot: Snapshot, reducer_version: str) -> str:
             ]
             for c in snapshot.closed_obligations
         ]
+    if snapshot.weights:
+        content["weights"] = sorted([s, w] for s, w in snapshot.weights.items())
+    if snapshot.reinstate_count:
+        content["reinstate_count"] = snapshot.reinstate_count
     body = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     payload = "|".join([body, reducer_version, snapshot.session_id, str(snapshot.seq)])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -182,10 +186,17 @@ def register_reducer(cls: type[Reducer]) -> type[Reducer]:
 
 
 def reducer_for_version(version: str) -> Reducer:
-    """Instantiate the registered reducer for ``version``.
+    """Instantiate the registered reducer for ``version`` with its default
+    configuration.
 
     Raises ``ValueError`` naming the known versions if none is registered,
     so ``Session.recover`` can refuse a log it would silently misread.
+
+    Construction parameters are not part of a version string, so the
+    instance returned here is always the unconfigured default: for
+    ``ReinstatingMaskReducer`` that means no reinstatement budget. A
+    session that should keep enforcing a budget after recovery passes its
+    budgeted reducer to ``Session.recover`` explicitly.
     """
     try:
         cls = _REGISTRY[version]
@@ -479,6 +490,36 @@ class ReinstatingMaskReducer(MaskMeetTombstoneReducer):
       "eliminate" under v1, are rejected with a reason rather than falling
       through as silent no-ops. Other unknown op types remain silent
       no-ops, as under v1.
+    - An elimination payload may carry an optional numeric ``weight`` and
+      an optional string ``reason``. Neither changes what is eliminated.
+      ``weight`` is recorded on the snapshot as ``weights[seq]`` so that a
+      budget predicate can read it later; ``reason`` stays in the envelope
+      payload. A ``weight`` that is not a real number, or a ``reason``
+      that is not a string, is rejected with a reason.
+
+    **Reinstatement budget.** The constructor takes three optional
+    limits, all unset by default:
+
+    - ``max_reinstates``: a cap on accepted ``reinstate`` envelopes over
+      the life of the session (``Snapshot.reinstate_count``).
+    - ``max_reinstated_pairs``: a cap on ``|reinstated_pairs|``. A
+      ``reinstate`` that would void pairs past the cap is rejected whole.
+    - ``retractable``: a predicate called with what the snapshot recorded
+      about the target elimination envelope, a mapping with ``"seq"`` and,
+      when one was given, ``"weight"``. Returning ``False`` rejects the
+      ``reinstate``. The predicate must be total; an exception propagates
+      out of ``Session.append`` and nothing is logged.
+
+    These are mechanism, not policy: the reducer bounds how much
+    reinstatement a log may contain and refuses attempts past the bound,
+    with a logged reason, but it never decides to reinstate anything.
+    The caller does. The budget acts only in ``check``; ``apply`` is the
+    same fold whatever the limits, so a log written under a budgeted
+    reducer replays to the same snapshot under the unbudgeted default,
+    and the ``version`` string does not change. The budget is therefore
+    **not** stored with the session: ``Session.recover`` through the
+    registry yields the unbudgeted reducer, and a caller who wants the
+    limits kept passes the budgeted reducer to ``recover`` explicitly.
 
     The monotone object under this reducer is the pair of record sets
     ``(asserted_pairs, reinstated_pairs)``, which only grow. The survivor
@@ -490,6 +531,38 @@ class ReinstatingMaskReducer(MaskMeetTombstoneReducer):
 
     _ELIMINATION_OPS = frozenset({"probe_result", "assert", "oracle_answer", "refine"})
     _RETIRED_OPS = frozenset({"retract", "tombstone"})
+
+    def __init__(
+        self,
+        *,
+        max_reinstates: int | None = None,
+        max_reinstated_pairs: int | None = None,
+        retractable: Callable[[Mapping[str, Any]], bool] | None = None,
+    ) -> None:
+        for name, value in (
+            ("max_reinstates", max_reinstates),
+            ("max_reinstated_pairs", max_reinstated_pairs),
+        ):
+            if value is not None:
+                if not _is_int(value):
+                    raise TypeError(f"{name} must be an int or None")
+                if value < 0:
+                    raise ValueError(f"{name} must be >= 0")
+        if retractable is not None and not callable(retractable):
+            raise TypeError("retractable must be callable or None")
+        self.max_reinstates = max_reinstates
+        self.max_reinstated_pairs = max_reinstated_pairs
+        self.retractable = retractable
+
+    @property
+    def budgeted(self) -> bool:
+        """Whether any reinstatement limit is set. A budgeted reducer is
+        not recoverable through the registry; see the class docstring."""
+        return (
+            self.max_reinstates is not None
+            or self.max_reinstated_pairs is not None
+            or self.retractable is not None
+        )
 
     # ------------------------------------------------------------------
     # Protocol surface
@@ -511,8 +584,17 @@ class ReinstatingMaskReducer(MaskMeetTombstoneReducer):
             )
 
         if op_type == "reinstate":
-            _, _, error = self._resolve_reinstate(snapshot, payload)
-            return (False, error) if error is not None else (True, None)
+            seq, pairs, error = self._resolve_reinstate(snapshot, payload)
+            if error is not None:
+                return False, error
+            return self._check_budget(snapshot, seq, pairs)
+
+        if op_type in self._ELIMINATION_OPS:
+            if "weight" in payload and not _is_real(payload["weight"]):
+                return False, "weight must be a real number when given"
+            if "reason" in payload and not isinstance(payload["reason"], str):
+                return False, "reason must be a string when given"
+            return super().check(snapshot, spec)
 
         if op_type == "enter_obligation":
             semantics = payload.get("semantics", OBLIGATION_NET)
@@ -552,6 +634,8 @@ class ReinstatingMaskReducer(MaskMeetTombstoneReducer):
         key_seqs = dict(snapshot.key_seqs)
         obligations = list(snapshot.obligations)
         closed = list(snapshot.closed_obligations)
+        weights = dict(snapshot.weights)
+        reinstate_count = snapshot.reinstate_count
         history = snapshot.conclusion_history
         terminated = snapshot.terminated
         attrs = dict(snapshot.attrs)
@@ -566,6 +650,8 @@ class ReinstatingMaskReducer(MaskMeetTombstoneReducer):
             asserted = self._eliminations(op_type, payload, set(universe), attrs)
             newly = asserted & snapshot.survivors
             asserted_pairs |= {(envelope.seq, h) for h in asserted}
+            if asserted and _is_real(payload.get("weight")):
+                weights[envelope.seq] = float(payload["weight"])
             if newly:
                 obligations = [
                     replace(o, eliminations_in_scope=o.eliminations_in_scope + len(newly))
@@ -579,6 +665,7 @@ class ReinstatingMaskReducer(MaskMeetTombstoneReducer):
         elif op_type == "reinstate":
             _, pairs, _ = self._resolve_reinstate(snapshot, payload)
             reinstated_pairs |= pairs
+            reinstate_count += 1
 
         elif op_type == "enter_obligation":
             obligations.append(
@@ -634,6 +721,8 @@ class ReinstatingMaskReducer(MaskMeetTombstoneReducer):
                 reinstated_pairs=frozenset(reinstated_pairs),
                 key_seqs=key_seqs,
                 closed_obligations=tuple(closed),
+                weights=weights,
+                reinstate_count=reinstate_count,
             )
         )
 
@@ -645,6 +734,41 @@ class ReinstatingMaskReducer(MaskMeetTombstoneReducer):
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _check_budget(
+        self,
+        snapshot: Snapshot,
+        seq: int,
+        pairs: frozenset[tuple[int, str]],
+    ) -> tuple[bool, str | None]:
+        """Apply the reinstatement budget to an otherwise acceptable
+        ``reinstate`` of ``pairs`` from the envelope at ``seq``."""
+        cap = self.max_reinstates
+        if cap is not None and snapshot.reinstate_count >= cap:
+            return False, (
+                f"reinstatement budget exhausted: {snapshot.reinstate_count} of "
+                f"{cap} accepted reinstate ops already used"
+            )
+        cap = self.max_reinstated_pairs
+        if cap is not None:
+            after = len(snapshot.reinstated_pairs) + len(pairs)
+            if after > cap:
+                return False, (
+                    f"reinstated-pair cap exceeded: voiding {len(pairs)} pair(s) would "
+                    f"bring the total to {after}, cap is {cap}"
+                )
+        if self.retractable is not None:
+            recorded: dict[str, Any] = {"seq": seq}
+            if seq in snapshot.weights:
+                recorded["weight"] = snapshot.weights[seq]
+            if not self.retractable(recorded):
+                detail = (
+                    f"weight {recorded['weight']!r}" if "weight" in recorded else "no weight"
+                )
+                return False, (
+                    f"seq {seq} is not retractable under the reducer's predicate ({detail})"
+                )
+        return True, None
 
     @staticmethod
     def _resolve_reinstate(
@@ -714,6 +838,10 @@ class ReinstatingMaskReducer(MaskMeetTombstoneReducer):
 
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_real(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def _as_list(value: Any) -> list[Any]:
