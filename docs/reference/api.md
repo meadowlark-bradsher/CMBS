@@ -6,11 +6,14 @@ reference.
 
 ```python
 from cmbs import (
-    Session, Snapshot, ObligationEntry, OntologyBundle,
+    Session, Snapshot, ObligationEntry, ClosedObligation, OntologyBundle,
+    OBLIGATION_GROSS, OBLIGATION_NET,
     OperationSpec, OperationEnvelope, AppendResult,
-    Reducer, MaskMeetTombstoneReducer, compute_state_hash, compute_position_digest,
+    Reducer, MaskMeetTombstoneReducer, ReinstatingMaskReducer,
+    register_reducer, reducer_for_version, registered_reducer_versions,
+    compute_state_hash, compute_position_digest,
     OpLogStore, InMemoryOpLogStore, RecoveredSession,
-    ProbeResult, ObligationExitResult, TerminationResult,
+    ProbeResult, ReinstateResult, ObligationExitResult, TerminationResult,
     HypothesisProvider, discover_providers,
     LegacyReplayAdapter, LegacyEliminationEvent, submit_legacy_elimination,
 )
@@ -36,7 +39,7 @@ session = Session(
 | ------------------ | --------------------------- | ----------------------------- | ------------------------------------------------------------ |
 | `hypothesis_ids`   | `Iterable[str]`             | required                      | Initial universe. Any iterable of strings; duplicates collapse |
 | `ontology`         | `OntologyBundle \| None`    | `None`                        | Stored for audit, never interpreted                          |
-| `reducer`          | `Reducer \| None`           | `MaskMeetTombstoneReducer()`  | The fold from log to snapshot                                |
+| `reducer`          | `Reducer \| None`           | `MaskMeetTombstoneReducer()`  | The fold from log to snapshot. Pass `ReinstatingMaskReducer()` to allow eliminations to be reinstated |
 | `store`            | `OpLogStore \| None`        | `InMemoryOpLogStore()`        | Where envelopes are persisted                                |
 | `stability_window` | `int`                       | `0`                           | INV-2 gate; must be `>= 0`                                   |
 | `session_id`       | `str \| None`               | `None`                        | A UUID is generated if omitted                               |
@@ -46,12 +49,15 @@ session = Session(
 | Method                                                                                   | Returns                | Notes                                                                           |
 | ---------------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------- |
 | `submit_probe_result(probe_id, observable_id, eliminated, *, source_id="", provenance=None)` | `ProbeResult`     | Appends a `probe_result` op keyed by `probe_id`. A repeated `probe_id` is rejected and logged (INV-3) |
-| `enter_obligation(obligation_id, min_eliminations=1, *, source_id="")`                   | `AppendResult`         | Adapter-initiated; rejected if `obligation_id` is already open                  |
-| `request_obligation_exit(obligation_id, *, source_id="")`                                | `ObligationExitResult` | Permitted only after `min_eliminations` recorded within scope (INV-6)           |
+| `enter_obligation(obligation_id, min_eliminations=1, *, semantics=None, source_id="")`   | `AppendResult`         | Adapter-initiated; rejected if `obligation_id` is already open. `semantics` is `"gross"` or `"net"`; meaningful only under `ReinstatingMaskReducer`, where `"net"` is the default |
+| `request_obligation_exit(obligation_id, *, source_id="")`                                | `ObligationExitResult` | Permitted only after `min_eliminations` of progress within scope (INV-6)        |
 | `declare_conclusion(conclusion_id, *, source_id="")`                                     | `AppendResult`         | Recorded for stability tracking                                                 |
 | `request_termination(*, source_id="")`                                                   | `TerminationResult`    | Gated by the stability window when enabled (INV-2). Idempotent; does not freeze the session |
+| `reinstate(seq, hypotheses=None, *, reason=None, source_id="")`                          | `ReinstateResult`      | Voids the eliminations made by the envelope at `seq`, or only `hypotheses` of them. Requires `ReinstatingMaskReducer`; raises `NotImplementedError` otherwise |
+| `reinstate_probe(probe_id, hypotheses=None, *, reason=None, source_id="")`               | `ReinstateResult`      | Same, naming the envelope by the `probe_id` it consumed. The probe ID stays consumed |
 
-`source_id` and `provenance` are opaque provenance copied onto the envelope.
+`source_id`, `provenance`, and `reason` are opaque provenance copied onto the
+envelope.
 
 ### Lower-level append
 
@@ -76,6 +82,8 @@ Two dedupe rules apply, with different meanings:
 | `entropy`                            | `float`                           | `log₂(\|survivors\|)`; `0.0` if `\|survivors\| <= 1`               |
 | `consumed_probes`                    | `frozenset[str]`                  | Idempotency keys consumed by accepted ops (the facade's `probe_id`s) |
 | `active_obligations`                 | `frozenset[str]`                  | Currently open obligation IDs                                      |
+| `closed_obligations`                 | `tuple[ClosedObligation, ...]`    | Frozen records of successful exits; empty under `MaskMeetTombstoneReducer` |
+| `obligation_progress(obligation_id)` | `int \| None`                     | Progress of an open obligation under its declared semantics        |
 | `is_terminated`                      | `bool`                            | Whether `request_termination` has succeeded                        |
 | `head_seq`                           | `int`                             | Seq of the last envelope (0 if empty)                              |
 | `position_digest`                    | `str`                             | Session-independent identity of the survivor set; see [`compute_position_digest`](#compute_position_digest) |
@@ -90,9 +98,11 @@ Two dedupe rules apply, with different meanings:
 recovered = Session.recover(store, session_id, reducer=None)
 ```
 
-Rebuilds a session by replaying its log from `store`. Raises `KeyError` if
-the store does not know the session and `ValueError` if `reducer.version`
-differs from the version that wrote the log.
+Rebuilds a session by replaying its log from `store`. With `reducer=None`
+the reducer registered for the stored version is used (see
+[`reducer_for_version`](#reducer)). Raises `KeyError` if the store does not
+know the session, and `ValueError` if no reducer is registered for the
+stored version or an explicit `reducer.version` differs from it.
 
 ## Snapshot
 
@@ -112,13 +122,27 @@ returned by `Session.snapshot()`.
 | `terminated`          | `bool`                           |                                                          |
 | `attrs`               | `dict[str, Any]`                 | Set by `assert` / `oracle_answer` ops; read by `refine`  |
 | `stability_window`    | `int`                            | Carried so the reducer can gate INV-2 from the snapshot  |
+| `asserted_pairs`      | `frozenset[tuple[int, str]]`     | Every `(seq, hypothesis)` an accepted elimination asserted dead. Populated only by `ReinstatingMaskReducer` |
+| `reinstated_pairs`    | `frozenset[tuple[int, str]]`     | The subset of `asserted_pairs` voided by `reinstate`     |
+| `key_seqs`            | `dict[str, int]`                 | Idempotency key → seq of the accepted envelope that consumed it |
+| `closed_obligations`  | `tuple[ClosedObligation, ...]`   | Frozen records of successful exits                       |
 
 Derived: `n_survivors`, `entropy`, `active_obligations`, `position_digest`,
-`obligation(obligation_id) -> ObligationEntry | None`, and `to_dict()` for a
+`in_force_pairs`, `obligation(obligation_id) -> ObligationEntry | None`,
+`obligation_progress(obligation_id) -> int | None`, `killers(hypothesis_id)
+-> frozenset[int]` (seqs of in-force envelopes holding it dead),
+`asserted_dead(seq) -> frozenset[str]`, and `to_dict()` for a
 JSON-serializable form.
 
-`ObligationEntry` has `obligation_id`, `min_eliminations`, and
-`eliminations_in_scope`.
+`ObligationEntry` has `obligation_id`, `min_eliminations`,
+`eliminations_in_scope`, and, under `ReinstatingMaskReducer`, `open_seq`,
+`semantics` (`"gross"` or `"net"`), and `dead_at_open`. Its
+`progress(eliminated)` is `eliminations_in_scope` for `gross` and
+`|eliminated − dead_at_open|` for `net`.
+
+`ClosedObligation` has `obligation_id`, `open_seq`, `exit_seq`, `semantics`,
+`min_eliminations`, and `progress_at_exit`. It is written once, on an
+accepted `exit_obligation`, and never changed.
 
 ## Operations
 
@@ -152,15 +176,16 @@ class AppendResult:
 
 `OperationEnvelope.to_dict()` gives a JSON-serializable form.
 
-### Op types understood by `MaskMeetTombstoneReducer`
+### Op types understood by the shipped reducers
 
 | `op_type`              | Payload                                              | Effect when accepted                                                       |
 | ---------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------- |
 | `probe_result`         | `observable_id`, `eliminate: [ids]`, optional `provenance` | Removes `eliminate ∩ survivors`. The facade sets `idempotency_key=probe_id` |
-| `retract`, `tombstone` | `eliminate: [ids]`                                   | Same elimination, no facade                                                |
+| `retract`, `tombstone` | `eliminate: [ids]`                                   | **v1 only:** same elimination, no facade. Retired under `ReinstatingMaskReducer`, which rejects them with a reason |
 | `assert`, `oracle_answer` | `eliminate: [ids]`, `set: {attr: value}`          | Elimination plus writes into `Snapshot.attrs`                              |
 | `refine`               | `if_attr`, `equals`, `eliminate: [ids]`              | Elimination only if `attrs[if_attr] == equals`                             |
-| `enter_obligation`     | `obligation_id`, `min_eliminations`                  | Opens an obligation; rejected if already open or `min_eliminations < 0`    |
+| `reinstate`            | `seq` or `probe_id`, optional `hypotheses: [ids]`, optional `reason` | **v2 only:** voids the in-force eliminations of that one accepted elimination envelope, or only the named subset. Rejected if the target is not an accepted elimination, is out of range, is already reinstated, or the subset names a hypothesis it never asserted |
+| `enter_obligation`     | `obligation_id`, `min_eliminations`, optional `semantics` | Opens an obligation; rejected if already open or `min_eliminations < 0`. `semantics` (`"gross"` or `"net"`, default `"net"`) is read by v2 only |
 | `exit_obligation`      | `obligation_id`                                      | Closes it; rejected if not open or under threshold (INV-6)                 |
 | `declare_conclusion`   | `conclusion_id`                                      | Appends to `conclusion_history`                                            |
 | `request_termination`  | —                                                    | Sets `terminated`; rejected if the stability window is unmet (INV-2)       |
@@ -170,6 +195,13 @@ Every op with an `idempotency_key` is rejected if that key was already
 consumed by an accepted op. Every newly eliminated hypothesis counts toward
 every open obligation. Hypothesis IDs outside the session's universe are
 ignored.
+
+Under `ReinstatingMaskReducer`, an elimination envelope also records every
+hypothesis it asserted dead, whether or not that hypothesis was still a
+survivor, and a hypothesis is eliminated iff at least one such record is
+still in force. Reinstating one of two envelopes that both killed `H` leaves
+`H` dead. Reinstatement never touches `attrs` and never un-consumes an
+idempotency key.
 
 ## Reducer
 
@@ -188,12 +220,26 @@ class Reducer(Protocol):
 envelope. `apply` folds one envelope: rejected envelopes only advance `seq`
 and rehash; accepted ones mutate. `reduce` is `initial` folded through
 `apply` over the whole log, rejected envelopes included. `classify` maps an
-op type to one of `"elimination"`, `"obligation"`, `"conclusion"`,
-`"termination"`, `"unknown"`.
+op type to one of `"elimination"`, `"reinstatement"`, `"obligation"`,
+`"conclusion"`, `"termination"`, `"unknown"`.
 
-`MaskMeetTombstoneReducer` is the shipped implementation, versioned
-`"v1_mask_meet_tombstone"`. The version string is stored with the session and
-checked on recovery.
+Two reducers ship. The version string is stored with the session and checked
+on recovery.
+
+- **`MaskMeetTombstoneReducer`**, `"v1_mask_meet_tombstone"`, the default.
+  Monotone set elimination: survivors only shrink.
+- **`ReinstatingMaskReducer`**, `"v2_mask_reinstate"`. Same vocabulary and
+  gates, plus the `reinstate` op and per-obligation `gross` / `net`
+  semantics. The monotone object becomes the pair of record sets
+  `(asserted_pairs, reinstated_pairs)`, which only grow; the survivor set is
+  a derived view that may grow or shrink. Entropy is non-increasing across
+  any log segment with no accepted `reinstate`.
+
+Reducers are looked up by version through a registry:
+`register_reducer(cls)` (a class decorator) adds one,
+`reducer_for_version(version)` instantiates it or raises `ValueError`, and
+`registered_reducer_versions()` lists the known versions. `Session.recover`
+uses the registry when no reducer is passed.
 
 ### `compute_state_hash`
 
@@ -207,6 +253,12 @@ window, attrs), the reducer version, the session ID, and `seq`. The hash does
 not include `snapshot.state_hash` itself. Two snapshots hash equal iff they
 describe the same belief at the same position of the same session under the
 same reducer.
+
+The fields only `ReinstatingMaskReducer` populates (`asserted_pairs`,
+`reinstated_pairs`, `key_seqs`, `closed_obligations`, and an obligation's
+`open_seq` / `semantics` / `dead_at_open`) enter the hashed content only when
+non-empty, so hashes computed under `MaskMeetTombstoneReducer` are
+byte-identical to those of earlier releases.
 
 ### `compute_position_digest`
 
@@ -258,6 +310,13 @@ class ProbeResult:
     error: str | None = None
     eliminated: frozenset[str] = frozenset()          # newly removed by this probe
     already_eliminated: frozenset[str] = frozenset()  # requested, but removed earlier
+
+@dataclass(frozen=True)
+class ReinstateResult:
+    accepted: bool
+    error: str | None = None
+    voided: frozenset[str] = frozenset()   # eliminations by the target envelope that were voided
+    revived: frozenset[str] = frozenset()  # the subset that returned to the survivor set
 
 @dataclass(frozen=True)
 class ObligationExitResult:

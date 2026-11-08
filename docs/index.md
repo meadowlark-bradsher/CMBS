@@ -3,9 +3,11 @@
 CMBS is a belief-state accounting library for long-horizon agents. It tracks
 hypotheses, records eliminations, computes entropy, and enforces obligation
 discipline using opaque identifiers — and **only** that. The kernel is
-domain-agnostic, monotone (hypotheses can be eliminated but never
-reintroduced), and replay-auditable: state is derived from an append-only
-operation log, and every step of that log carries a verifiable state hash.
+domain-agnostic, monotone by default (hypotheses can be eliminated but never
+reintroduced; an opt-in reducer allows a logged reinstatement while the
+record set stays monotone), and replay-auditable: state is derived from an
+append-only operation log, and every step of that log carries a verifiable
+state hash.
 
 The intended use is to externalize belief out of prompts, hidden agent state,
 or ad-hoc logs into an explicit, inspectable state machine that policy and

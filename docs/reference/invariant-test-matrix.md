@@ -11,8 +11,29 @@ summarizes what is tested and where.
 | ------- | ---------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------- | ----- |
 | INV-2   | Stability window       | Termination requires N consecutive identical conclusions (when window > 0)     | `TestTerminationDiscipline`, `TestBoundaryNonSingletonTermination`, `TestBoundaryNonBinaryConclusion` | 10 |
 | INV-3   | Probe non-repetition   | Duplicate `probe_id` submissions are rejected                                  | `TestINV3ProbeNonRepetition`                                               | 5     |
-| INV-5a  | Entropy quantification | `entropy == log₂(\|survivors\|)`; queryable but never gating                   | `TestINV5aEntropyQuantification`, `TestEntropyObservation`                 | 9     |
-| INV-6   | Non-trivial exit       | Obligation exit requires `min_eliminations` within scope                       | `TestINV6NonTrivialExit`, `TestObligationDiscipline`                       | 11    |
+| INV-5a  | Entropy quantification | `entropy == log₂(\|survivors\|)`; queryable but never gating. Non-increasing under the default reducer, and under `ReinstatingMaskReducer` across any segment with no accepted `reinstate` | `TestINV5aEntropyQuantification` (monotonicity parametrized over both reducers), `TestEntropyObservation` | 11 |
+| INV-6   | Non-trivial exit       | Obligation exit requires `min_eliminations` of progress within scope           | `TestINV6NonTrivialExit`, `TestObligationDiscipline`                       | 11    |
+
+## Reinstatement invariants (`tests/test_reinstate.py`)
+
+These hold under `ReinstatingMaskReducer` and are namespaced until they are
+given numbered slots.
+
+| ID      | Property                                                                                              | Class                            |
+| ------- | ----------------------------------------------------------------------------------------------------- | -------------------------------- |
+| INV-R1  | A `reinstate` targets exactly one in-force, accepted elimination envelope; each `(seq, h)` pair is reinstated at most once; a subset outside the asserted set is rejected | `TestReinstate`                  |
+| INV-R2  | `h` survives iff no in-force pair names it; reinstating one of two killers does not revive `h`         | `TestReinstate`, property test   |
+| INV-R3  | The log only grows; survivors grow only via `reinstate` and shrink only via elimination               | `TestReinstate`, property test   |
+| INV-R4  | Reinstatement leaves `attrs` unchanged                                                                | `TestReinstate`                  |
+| INV-O1  | `net` progress ≡ `\|eliminated_now − dead_at_open\|`; in-scope kill-then-reinstate nets 0; pre-open kills are inert both ways; never negative | `TestObligationSemantics`, property test |
+| INV-O2  | A closed obligation record is unchanged by any later op                                               | `TestObligationSemantics`, property test |
+
+The same file pins one v1 state hash so the new snapshot fields provably
+leave `MaskMeetTombstoneReducer` hashes unchanged, and covers the retired
+`retract` / `tombstone` ops, recovery through the version registry, and a
+seeded random-sequence property test (`TestVocabulary`,
+`TestHashingReplayRecovery`, `test_random_sequences_keep_the_invariants`;
+54 tests).
 
 ## Boundary properties
 
@@ -33,7 +54,7 @@ between mechanism and policy:
 | Class                                  | Tests | Concern                                               |
 | -------------------------------------- | ----- | ----------------------------------------------------- |
 | `TestINV3ProbeNonRepetition`           | 5     | INV-3                                                 |
-| `TestINV5aEntropyQuantification`       | 5     | INV-5a                                                |
+| `TestINV5aEntropyQuantification`       | 7     | INV-5a, including the conditional form under `ReinstatingMaskReducer` |
 | `TestINV6NonTrivialExit`               | 6     | INV-6                                                 |
 | `TestBoundaryOpaqueIdentifiers`        | 5     | B-OPAQUE                                              |
 | `TestBoundaryNonSingletonTermination`  | 2     | B-NONSINGLETON, INV-2                                 |
@@ -44,7 +65,7 @@ between mechanism and policy:
 | `TestTerminationDiscipline`            | 6     | INV-2, B-ADAPTER                                      |
 | `TestMigrationLegacyCompatibility`     | 4     | Legacy ID formats, recovery from a store, replay      |
 | `TestMigrationIncrementalAdoption`     | 2     | Running alongside a legacy system; audit trail in the log |
-| **Total**                              | **49** |                                                      |
+| **Total**                              | **51** |                                                      |
 
 ## Substrate coverage in `tests/test_session_kernel.py`
 
@@ -73,5 +94,6 @@ The remaining tests exercise the layers above the kernel:
 | `test_legacy_adapter.py`    | 5     | `LegacyReplayAdapter`                                    |
 | `test_spi.py`               | 4     | `HypothesisProvider` feeding a `Session`; `discover_providers` |
 | `test_tutorials.py`         | 12    | Every tutorial offline; policy selection; a policy that insists on repeating is refused by the kernel |
+| `test_reinstate.py`         | 54    | `ReinstatingMaskReducer`: INV-R1–R4, INV-O1–O2, the pinned v1 hash, the version registry, a random-sequence property test |
 
-Total across all files: **141 tests**.
+Total across all files: **197 tests**.

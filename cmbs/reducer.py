@@ -31,10 +31,17 @@ from dataclasses import replace
 from typing import Any, Protocol, runtime_checkable
 
 from .operations import OperationEnvelope, OperationSpec
-from .snapshot import ObligationEntry, Snapshot
+from .snapshot import (
+    OBLIGATION_NET,
+    OBLIGATION_SEMANTICS,
+    ClosedObligation,
+    ObligationEntry,
+    Snapshot,
+)
 
 # Canonical op categories returned by ``Reducer.classify``.
 KIND_ELIMINATION = "elimination"
+KIND_REINSTATEMENT = "reinstatement"
 KIND_OBLIGATION = "obligation"
 KIND_CONCLUSION = "conclusion"
 KIND_TERMINATION = "termination"
@@ -114,25 +121,89 @@ def compute_state_hash(snapshot: Snapshot, reducer_version: str) -> str:
     Two snapshots hash equal iff they describe the same belief state at the
     same position of the same session under the same reducer. The hash
     does **not** include ``snapshot.state_hash`` itself.
+
+    Fields that only a reinstatement-aware reducer populates enter the
+    hashed content only when non-empty, and an obligation's extended
+    fields only when it carries an ``open_seq``. Hashes computed under
+    ``MaskMeetTombstoneReducer`` are therefore byte-identical to those of
+    earlier releases.
     """
-    content = {
+    content: dict[str, Any] = {
         "survivors": sorted(snapshot.survivors),
         "eliminated": sorted(snapshot.eliminated),
         "consumed_op_ids": sorted(snapshot.consumed_op_ids),
-        "obligations": [
-            [o.obligation_id, o.min_eliminations, o.eliminations_in_scope]
-            for o in snapshot.obligations
-        ],
+        "obligations": [_obligation_content(o) for o in snapshot.obligations],
         "conclusion_history": list(snapshot.conclusion_history),
         "terminated": snapshot.terminated,
         "stability_window": snapshot.stability_window,
         "attrs": _canonicalize(snapshot.attrs),
     }
+    if snapshot.asserted_pairs:
+        content["asserted_pairs"] = sorted([s, h] for s, h in snapshot.asserted_pairs)
+    if snapshot.reinstated_pairs:
+        content["reinstated_pairs"] = sorted([s, h] for s, h in snapshot.reinstated_pairs)
+    if snapshot.key_seqs:
+        content["key_seqs"] = sorted([k, v] for k, v in snapshot.key_seqs.items())
+    if snapshot.closed_obligations:
+        content["closed_obligations"] = [
+            [
+                c.obligation_id,
+                c.open_seq,
+                c.exit_seq,
+                c.semantics,
+                c.min_eliminations,
+                c.progress_at_exit,
+            ]
+            for c in snapshot.closed_obligations
+        ]
     body = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     payload = "|".join([body, reducer_version, snapshot.session_id, str(snapshot.seq)])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _obligation_content(entry: ObligationEntry) -> list[Any]:
+    base: list[Any] = [entry.obligation_id, entry.min_eliminations, entry.eliminations_in_scope]
+    if entry.open_seq:
+        base.extend([entry.open_seq, entry.semantics, sorted(entry.dead_at_open)])
+    return base
+
+
+# ----------------------------------------------------------------------
+# Version registry
+# ----------------------------------------------------------------------
+
+_REGISTRY: dict[str, type[Reducer]] = {}
+
+
+def register_reducer(cls: type[Reducer]) -> type[Reducer]:
+    """Class decorator: make ``cls`` recoverable by its ``version`` string."""
+    _REGISTRY[cls.version] = cls
+    return cls
+
+
+def reducer_for_version(version: str) -> Reducer:
+    """Instantiate the registered reducer for ``version``.
+
+    Raises ``ValueError`` naming the known versions if none is registered,
+    so ``Session.recover`` can refuse a log it would silently misread.
+    """
+    try:
+        cls = _REGISTRY[version]
+    except KeyError:
+        known = ", ".join(sorted(_REGISTRY)) or "none"
+        raise ValueError(
+            f"no reducer registered for version {version!r}; known versions: {known}. "
+            "Pass reducer=... explicitly."
+        ) from None
+    return cls()
+
+
+def registered_reducer_versions() -> tuple[str, ...]:
+    """The version strings ``reducer_for_version`` knows."""
+    return tuple(sorted(_REGISTRY))
+
+
+@register_reducer
 class MaskMeetTombstoneReducer:
     """The shipped reducer.
 
@@ -375,6 +446,270 @@ class MaskMeetTombstoneReducer:
                 return set()
         requested = set(_as_list(payload.get("eliminate")))
         return requested & survivors
+
+
+@register_reducer
+class ReinstatingMaskReducer(MaskMeetTombstoneReducer):
+    """Reinstatement-aware sibling of ``MaskMeetTombstoneReducer``.
+
+    Replay-versioned as ``"v2_mask_reinstate"``. It shares the v1 op
+    vocabulary and invariant gates, and differs in these ways:
+
+    - **Support sets.** Every accepted elimination envelope records the
+      pair ``(seq, h)`` for each hypothesis it asserted dead — the
+      requested set after any ``refine`` condition, restricted to the
+      universe — whether or not ``h`` was still a survivor. A hypothesis
+      is eliminated iff it has at least one such pair not yet reinstated.
+      Reinstating one of two envelopes that both killed ``h`` leaves ``h``
+      dead.
+    - ``reinstate``: voids the in-force pairs of exactly one accepted
+      elimination envelope, named by ``payload["seq"]`` or by
+      ``payload["probe_id"]`` (the idempotency key it consumed). An
+      optional ``payload["hypotheses"]`` restricts it to a subset, which
+      must lie within that envelope's asserted set and must not already be
+      reinstated. Reinstatement never touches ``attrs`` and never
+      un-consumes an idempotency key.
+    - ``enter_obligation`` accepts ``payload["semantics"]``: ``"gross"``
+      counts newly removed hypotheses in scope and ignores reinstatement
+      (the v1 behaviour); ``"net"`` (the default) measures
+      ``|eliminated_now \\ eliminated_at_open|``. ``exit_obligation`` is
+      gated on progress under the declared semantics, and a successful
+      exit leaves a frozen ``ClosedObligation`` record on the snapshot.
+    - The retired ``retract`` and ``tombstone`` op types, which meant
+      "eliminate" under v1, are rejected with a reason rather than falling
+      through as silent no-ops. Other unknown op types remain silent
+      no-ops, as under v1.
+
+    The monotone object under this reducer is the pair of record sets
+    ``(asserted_pairs, reinstated_pairs)``, which only grow. The survivor
+    set is a derived view of them and may grow or shrink; entropy is
+    non-increasing only across segments with no accepted ``reinstate``.
+    """
+
+    version: str = "v2_mask_reinstate"
+
+    _ELIMINATION_OPS = frozenset({"probe_result", "assert", "oracle_answer", "refine"})
+    _RETIRED_OPS = frozenset({"retract", "tombstone"})
+
+    # ------------------------------------------------------------------
+    # Protocol surface
+    # ------------------------------------------------------------------
+
+    def check(self, snapshot: Snapshot, spec: OperationSpec) -> tuple[bool, str | None]:
+        key = spec.idempotency_key
+        if key is not None and key in snapshot.consumed_op_ids:
+            return False, f"duplicate idempotency_key: {key!r}"
+
+        payload = spec.payload or {}
+        op_type = spec.op_type
+
+        if op_type in self._RETIRED_OPS:
+            return False, (
+                f"op_type {op_type!r} is retired under reducer {self.version!r}: "
+                "use an elimination op such as 'probe_result' to eliminate, "
+                "or 'reinstate' to revive"
+            )
+
+        if op_type == "reinstate":
+            _, _, error = self._resolve_reinstate(snapshot, payload)
+            return (False, error) if error is not None else (True, None)
+
+        if op_type == "enter_obligation":
+            semantics = payload.get("semantics", OBLIGATION_NET)
+            if semantics not in OBLIGATION_SEMANTICS:
+                return False, (
+                    f"semantics must be one of {sorted(OBLIGATION_SEMANTICS)}, got {semantics!r}"
+                )
+            return super().check(snapshot, spec)
+
+        if op_type == "exit_obligation":
+            obligation_id = payload.get("obligation_id")
+            if not isinstance(obligation_id, str):
+                return False, "exit_obligation requires a string obligation_id"
+            entry = snapshot.obligation(obligation_id)
+            if entry is None:
+                return False, f"obligation not active: {obligation_id!r}"
+            progress = entry.progress(snapshot.eliminated)
+            if progress < entry.min_eliminations:
+                return False, (
+                    f"insufficient {entry.semantics} progress for {obligation_id!r}: "
+                    f"{progress} of {entry.min_eliminations} required"
+                )
+            return True, None
+
+        return super().check(snapshot, spec)
+
+    def apply(self, snapshot: Snapshot, envelope: OperationEnvelope) -> Snapshot:
+        if not envelope.accepted:
+            return self._hashed(replace(snapshot, seq=envelope.seq))
+
+        payload = envelope.payload or {}
+        op_type = envelope.op_type
+
+        universe = snapshot.survivors | snapshot.eliminated
+        asserted_pairs = set(snapshot.asserted_pairs)
+        reinstated_pairs = set(snapshot.reinstated_pairs)
+        key_seqs = dict(snapshot.key_seqs)
+        obligations = list(snapshot.obligations)
+        closed = list(snapshot.closed_obligations)
+        history = snapshot.conclusion_history
+        terminated = snapshot.terminated
+        attrs = dict(snapshot.attrs)
+
+        if envelope.idempotency_key is not None:
+            key_seqs[envelope.idempotency_key] = envelope.seq
+
+        if op_type in self._ELIMINATION_OPS:
+            # Same selection as v1, but against the universe: every
+            # hypothesis the op asserts dead is recorded, not only those
+            # still surviving.
+            asserted = self._eliminations(op_type, payload, set(universe), attrs)
+            newly = asserted & snapshot.survivors
+            asserted_pairs |= {(envelope.seq, h) for h in asserted}
+            if newly:
+                obligations = [
+                    replace(o, eliminations_in_scope=o.eliminations_in_scope + len(newly))
+                    for o in obligations
+                ]
+            set_fields = payload.get("set")
+            if op_type in {"assert", "oracle_answer"} and isinstance(set_fields, dict):
+                for k, v in set_fields.items():
+                    attrs[str(k)] = v
+
+        elif op_type == "reinstate":
+            _, pairs, _ = self._resolve_reinstate(snapshot, payload)
+            reinstated_pairs |= pairs
+
+        elif op_type == "enter_obligation":
+            obligations.append(
+                ObligationEntry(
+                    obligation_id=payload["obligation_id"],
+                    min_eliminations=int(payload.get("min_eliminations", 1)),
+                    eliminations_in_scope=0,
+                    open_seq=envelope.seq,
+                    semantics=payload.get("semantics", OBLIGATION_NET),
+                    dead_at_open=snapshot.eliminated,
+                )
+            )
+
+        elif op_type == "exit_obligation":
+            target = payload["obligation_id"]
+            entry = snapshot.obligation(target)
+            if entry is not None:  # always true for an accepted exit
+                closed.append(
+                    ClosedObligation(
+                        obligation_id=entry.obligation_id,
+                        open_seq=entry.open_seq,
+                        exit_seq=envelope.seq,
+                        semantics=entry.semantics,
+                        min_eliminations=entry.min_eliminations,
+                        progress_at_exit=entry.progress(snapshot.eliminated),
+                    )
+                )
+            obligations = [o for o in obligations if o.obligation_id != target]
+
+        elif op_type == "declare_conclusion":
+            history = (*history, payload["conclusion_id"])
+
+        elif op_type == "request_termination":
+            terminated = True
+
+        # Unknown op types: no state change beyond seq/consumed key.
+
+        eliminated = frozenset(h for _, h in asserted_pairs - reinstated_pairs)
+        return self._hashed(
+            Snapshot(
+                session_id=snapshot.session_id,
+                seq=envelope.seq,
+                state_hash="",
+                survivors=universe - eliminated,
+                eliminated=eliminated,
+                consumed_op_ids=frozenset(key_seqs),
+                obligations=tuple(obligations),
+                conclusion_history=history,
+                terminated=terminated,
+                attrs=attrs,
+                stability_window=snapshot.stability_window,
+                asserted_pairs=frozenset(asserted_pairs),
+                reinstated_pairs=frozenset(reinstated_pairs),
+                key_seqs=key_seqs,
+                closed_obligations=tuple(closed),
+            )
+        )
+
+    def classify(self, envelope_kind: str) -> str:
+        if envelope_kind == "reinstate":
+            return KIND_REINSTATEMENT
+        return super().classify(envelope_kind)
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_reinstate(
+        snapshot: Snapshot,
+        payload: dict[str, Any],
+    ) -> tuple[int | None, frozenset[tuple[int, str]], str | None]:
+        """Resolve a ``reinstate`` payload against ``snapshot``.
+
+        Returns ``(target_seq, pairs_to_void, error)``. ``error`` is the
+        rejection reason, or ``None`` when the op is acceptable; ``check``
+        and ``apply`` share this so the two can never disagree.
+        """
+        has_seq = "seq" in payload
+        has_probe = "probe_id" in payload
+        if has_seq == has_probe:
+            return None, frozenset(), "reinstate requires exactly one of 'seq' or 'probe_id'"
+
+        if has_probe:
+            probe_id = payload["probe_id"]
+            if not isinstance(probe_id, str):
+                return None, frozenset(), "probe_id must be a string"
+            seq = snapshot.key_seqs.get(probe_id)
+            if seq is None:
+                return None, frozenset(), (
+                    f"unknown probe_id {probe_id!r}: no accepted envelope consumed it"
+                )
+        else:
+            seq = payload["seq"]
+            if not _is_int(seq):
+                return None, frozenset(), "seq must be an integer"
+            if not 1 <= seq <= snapshot.seq:
+                return None, frozenset(), f"seq {seq} out of range [1, {snapshot.seq}]"
+
+        asserted = snapshot.asserted_dead(seq)
+        if not asserted:
+            return seq, frozenset(), (
+                f"seq {seq} is not an accepted elimination envelope "
+                "(or asserted no hypotheses)"
+            )
+        in_force = asserted - frozenset(h for s, h in snapshot.reinstated_pairs if s == seq)
+
+        if "hypotheses" in payload:
+            subset = payload["hypotheses"]
+            if not isinstance(subset, list | tuple | set | frozenset):
+                return seq, frozenset(), "hypotheses must be a collection of hypothesis IDs"
+            names = frozenset(subset)
+            if not names:
+                return seq, frozenset(), "hypotheses must not be empty when given"
+            unknown = names - asserted
+            if unknown:
+                return seq, frozenset(), (
+                    f"never asserted dead by seq {seq}: {sorted(map(str, unknown))}"
+                )
+            already = names - in_force
+            if already:
+                return seq, frozenset(), (
+                    f"already reinstated from seq {seq}: {sorted(map(str, already))}"
+                )
+            targets = names
+        else:
+            if not in_force:
+                return seq, frozenset(), f"seq {seq} is already fully reinstated"
+            targets = in_force
+
+        return seq, frozenset((seq, h) for h in targets), None
 
 
 def _is_int(value: Any) -> bool:

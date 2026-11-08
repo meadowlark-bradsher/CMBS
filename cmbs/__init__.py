@@ -22,13 +22,25 @@ from .adapters.legacy import (
     submit_legacy_elimination,
 )
 from .operations import AppendResult, OperationEnvelope, OperationSpec
-from .reducer import MaskMeetTombstoneReducer, Reducer, compute_state_hash
+from .reducer import (
+    MaskMeetTombstoneReducer,
+    Reducer,
+    ReinstatingMaskReducer,
+    compute_state_hash,
+    reducer_for_version,
+    register_reducer,
+    registered_reducer_versions,
+)
 from .session import Session
 from .snapshot import (
+    OBLIGATION_GROSS,
+    OBLIGATION_NET,
+    ClosedObligation,
     ObligationEntry,
     ObligationExitResult,
     OntologyBundle,
     ProbeResult,
+    ReinstateResult,
     Snapshot,
     TerminationResult,
     compute_position_digest,
@@ -41,6 +53,9 @@ __all__ = [
     "Session",
     "Snapshot",
     "ObligationEntry",
+    "ClosedObligation",
+    "OBLIGATION_GROSS",
+    "OBLIGATION_NET",
     "OntologyBundle",
     # operations
     "OperationSpec",
@@ -49,6 +64,10 @@ __all__ = [
     # reducer
     "Reducer",
     "MaskMeetTombstoneReducer",
+    "ReinstatingMaskReducer",
+    "register_reducer",
+    "reducer_for_version",
+    "registered_reducer_versions",
     "compute_state_hash",
     "compute_position_digest",
     # persistence
@@ -57,6 +76,7 @@ __all__ = [
     "RecoveredSession",
     # facade results
     "ProbeResult",
+    "ReinstateResult",
     "ObligationExitResult",
     "TerminationResult",
     # SPI

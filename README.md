@@ -2,7 +2,7 @@
 
 **Externalized belief state for long-horizon agents.** CMBS keeps "what's
 been ruled out and why" *out* of your LLM prompt and *in* an inspectable,
-monotone, replay-auditable state machine. Prompts stay constant-token even
+monotone-by-default, replay-auditable state machine. Prompts stay constant-token even
 as investigations run for hundreds of steps; non-repetition is structurally
 enforced; every step of the op log carries a state hash for verifiable replay.
 

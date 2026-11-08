@@ -31,6 +31,41 @@ the old surface is removed outright rather than deprecated.
   `Session.position_digest`: a session-independent identity for the
   survivor set, for convergence checks, zero-information-probe detection,
   and policy caching across runs.
+- `ReinstatingMaskReducer` (`"v2_mask_reinstate"`), an opt-in sibling of
+  the default reducer under which an elimination can be voided by a
+  logged `reinstate` op while the log and the record set stay monotone.
+  Every elimination records each hypothesis it asserted dead as a
+  `(seq, hypothesis)` pair; a hypothesis survives iff no pair naming it is
+  in force, so reinstating one of two killers does not revive it.
+  `Session.reinstate(seq, hypotheses=None)` and
+  `Session.reinstate_probe(probe_id, hypotheses=None)` drive it and
+  return a `ReinstateResult`. Reinstatement never touches `attrs` and
+  never un-consumes a probe ID. The retired `retract` / `tombstone` ops
+  are rejected with a reason under this reducer; other unknown op types
+  remain silent no-ops.
+- Obligation counting semantics, declared per obligation via
+  `enter_obligation(..., semantics="gross" | "net")` and read by
+  `ReinstatingMaskReducer` only. `gross` is the running in-scope count
+  and ignores reinstatement; `net` (the default there) is
+  `|eliminated_now − eliminated_at_open|`, so an in-scope
+  eliminate-then-reinstate earns nothing. Successful exits leave a frozen
+  `ClosedObligation` record on the snapshot (`Session.closed_obligations`),
+  and `Session.obligation_progress(id)` reports progress under the declared
+  semantics.
+- New `Snapshot` fields `asserted_pairs`, `reinstated_pairs`, `key_seqs`,
+  `closed_obligations`, plus `killers(h)`, `asserted_dead(seq)`,
+  `in_force_pairs`, and `obligation_progress(id)`. `ObligationEntry` gains
+  `open_seq`, `semantics`, `dead_at_open`, and `progress(eliminated)`. All
+  default to empty and enter the state hash only when non-empty, so hashes
+  under the default reducer are unchanged (pinned by test).
+- A reducer version registry: `register_reducer`, `reducer_for_version`,
+  `registered_reducer_versions`. `Session.recover` picks the reducer from
+  the stored version when none is passed, and raises `ValueError` for an
+  unregistered version.
+- `tests/test_reinstate.py`: the namespaced invariants INV-R1–R4 and
+  INV-O1–O2, a pinned v1 hash, recovery through the registry, and a
+  seeded random-sequence property test. INV-5a's monotonicity test now
+  runs under both reducers, with a new test for its conditional form.
 - `load_builtin_kit(name)` in both reference adapters
   (`cmbs.adapters.twenty_questions`, `cmbs.adapters.itbench`) — loads
   kit YAMLs via `importlib.resources` so examples and downstream users

@@ -180,7 +180,7 @@ port pre-existing elimination logs in.
 | Uses **soft constraints** that combine continuously | Constraint solvers (z3, OR-Tools) |
 | **Discovers new hypotheses mid-run** (open-world) | CMBS is closed-world — you'd bolt on a hypothesis-expansion step yourself |
 | Models **arc-consistent constraint graphs** | Constraint propagation libraries |
-| Needs **undo / un-elimination** | CMBS is monotone by design — by construction this isn't supported |
+| Needs **soft, weighted belief** that drifts back and forth | CMBS is a hard mask. Discrete undo is available: opt in to `ReinstatingMaskReducer` and a logged `reinstate` op voids an elimination while the record set stays monotone and `net` obligations ignore the round trip |
 | Wants to **fork and compare alternate orderings** | Not in the package today. The log makes it possible to build on top; nothing ships for it yet |
 | Only needs **last-turn memory** | A plain dict is simpler |
 

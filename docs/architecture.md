@@ -39,7 +39,9 @@ append; the cached value is always equal to a full reduction of the log.
 ## Kernel responsibilities
 
 - Track the current set of surviving hypotheses
-- Apply eliminations submitted by adapters (monotone — survivors only shrink)
+- Apply eliminations submitted by adapters (monotone by default — survivors
+  only shrink; the opt-in `ReinstatingMaskReducer` lets a logged `reinstate`
+  op void an elimination while the record set stays monotone)
 - Compute entropy as `log₂(|survivors|)`
 - Reject duplicate probe submissions, and log the rejected attempt
 - Track epistemic obligations and gate their exit on substantive change
@@ -68,7 +70,7 @@ persisted on the envelope, and only accepted operations change belief.
 | ID      | Name                   | Where enforced                                                                 |
 | ------- | ---------------------- | ------------------------------------------------------------------------------ |
 | INV-3   | Probe non-repetition   | Any op whose `idempotency_key` was already consumed is rejected. The facade uses `probe_id` as the key of `probe_result` ops. |
-| INV-5a  | Entropy quantification | `Snapshot.entropy` and `Session.entropy` return `log₂(\|survivors\|)`; never used as a gate |
+| INV-5a  | Entropy quantification | `Snapshot.entropy` and `Session.entropy` return `log₂(\|survivors\|)`; never used as a gate. Non-increasing under the default reducer, and under `ReinstatingMaskReducer` across any segment with no accepted `reinstate` |
 | INV-6   | Non-trivial exit       | `exit_obligation` is accepted only once `min_eliminations` have been recorded *after* the matching `enter_obligation` |
 | INV-2*  | Stability window       | `request_termination` is accepted only if the last N declared conclusions are identical |
 
@@ -78,7 +80,11 @@ persisted on the envelope, and only accepted operations change belief.
 exercise each invariant.
 
 Any newly eliminated hypothesis, whatever operation removed it, counts toward
-every obligation open at the time.
+every obligation open at the time. Under `ReinstatingMaskReducer` each
+obligation declares how it counts: `gross` keeps that running count and
+ignores reinstatement, `net` (the default) measures the hypotheses dead now
+that were live when it opened, so an in-scope elimination that is later
+reinstated earns nothing.
 
 ## Layers
 
@@ -92,9 +98,11 @@ top:
    operations directly.
 2. **`Reducer`** — the versioned fold from log to `Snapshot`. The shipped
    `MaskMeetTombstoneReducer` (`"v1_mask_meet_tombstone"`) implements
-   monotone set elimination plus the invariant gates above. A replacement
-   reducer changes the meaning of a log, which is why the version is stored
-   with the session and checked on recovery.
+   monotone set elimination plus the invariant gates above. Its sibling
+   `ReinstatingMaskReducer` (`"v2_mask_reinstate"`) adds the `reinstate` op
+   and per-obligation counting semantics. A different reducer changes the
+   meaning of a log, which is why the version is stored with the session,
+   checked on recovery, and used to pick the reducer when none is passed.
 3. **`OpLogStore`** — the persistence SPI. `InMemoryOpLogStore` ships in the
    box; file, database, or network stores can be added without modifying
    the kernel. The store holds envelopes and session metadata only; it never
@@ -127,6 +135,13 @@ of the universe, every elimination is a meet against a mask, and the
 universe is the top element. Obligations, conclusion history, and `attrs`
 are workflow state layered on that lattice, which is why they are in the
 state hash and not the digest.
+
+Under `ReinstatingMaskReducer` the monotone object moves one level down.
+What only grows is the pair of record sets: every `(seq, hypothesis)` an
+elimination asserted, and the subset a `reinstate` has voided. The survivor
+set is a view of those records and can move back up the lattice when a
+record is voided. `position_digest` still names the current point; it is
+simply no longer guaranteed to descend along the log.
 
 ## Two kinds of repeat
 
