@@ -7,6 +7,10 @@ once it reaches 1.0.0.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] — 2026-11-08
+
 The v0 and v2 kernels are unified into a single `Session` kernel per
 [ADR-001](design/adr-001-unify-kernels.md) and
 [ADR-002](design/adr-002-naming.md). No published consumers existed, so
@@ -191,5 +195,6 @@ Initial public release.
 - 77 tests covering kernel invariants, server lifecycle, SPI conformance,
   and the v2 oplog model.
 
-[Unreleased]: https://github.com/meadowlark-bradsher/CMBS/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/meadowlark-bradsher/CMBS/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/meadowlark-bradsher/CMBS/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/meadowlark-bradsher/CMBS/releases/tag/v0.1.0
