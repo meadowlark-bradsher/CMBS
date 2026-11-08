@@ -21,7 +21,15 @@ from .adapters.legacy import (
     LegacyReplayAdapter,
     submit_legacy_elimination,
 )
-from .operations import AppendResult, OperationEnvelope, OperationSpec
+from .operations import (
+    LOG_HASH_GENESIS,
+    LOG_HASH_SCHEME,
+    AppendResult,
+    OperationEnvelope,
+    OperationSpec,
+    canonical_envelope_bytes,
+    compute_log_hash,
+)
 from .reducer import (
     MaskMeetTombstoneReducer,
     Reducer,
@@ -61,6 +69,10 @@ __all__ = [
     "OperationSpec",
     "OperationEnvelope",
     "AppendResult",
+    "compute_log_hash",
+    "canonical_envelope_bytes",
+    "LOG_HASH_SCHEME",
+    "LOG_HASH_GENESIS",
     # reducer
     "Reducer",
     "MaskMeetTombstoneReducer",

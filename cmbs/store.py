@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-from .operations import OperationEnvelope
+from .operations import LOG_HASH_SCHEME, OperationEnvelope
 from .snapshot import OntologyBundle
 
 
@@ -28,6 +28,10 @@ class RecoveredSession:
     stability_window: int
     reducer_version: str
     envelopes: tuple[OperationEnvelope, ...]
+    log_hash_scheme: str = LOG_HASH_SCHEME
+    """Scheme the envelopes' ``log_hash`` values were written under. Stores
+    that predate the field record nothing and so report the current scheme;
+    recovery then verifies whatever hashed envelopes the log holds."""
 
 
 @runtime_checkable
@@ -41,8 +45,16 @@ class OpLogStore(Protocol):
         ontology: OntologyBundle | None,
         stability_window: int,
         reducer_version: str,
+        log_hash_scheme: str = LOG_HASH_SCHEME,
     ) -> None:
-        """Register a new session. Raises if the session_id already exists."""
+        """Register a new session. Raises if the session_id already exists.
+
+        ``log_hash_scheme`` names the envelope-hash scheme the session will
+        write under; store it with the session and return it from
+        :meth:`recover`. Stores written against the original five-argument
+        signature keep working: the kernel passes the keyword only to
+        stores whose ``create_session`` accepts it.
+        """
 
     def append(
         self,
@@ -74,6 +86,7 @@ class _SessionLog:
     ontology: OntologyBundle | None
     stability_window: int
     reducer_version: str
+    log_hash_scheme: str = LOG_HASH_SCHEME
     envelopes: list[OperationEnvelope] = field(default_factory=list)
 
 
@@ -94,6 +107,7 @@ class InMemoryOpLogStore:
         ontology: OntologyBundle | None,
         stability_window: int,
         reducer_version: str,
+        log_hash_scheme: str = LOG_HASH_SCHEME,
     ) -> None:
         if session_id in self._sessions:
             raise ValueError(f"Session {session_id!r} already exists.")
@@ -103,6 +117,7 @@ class InMemoryOpLogStore:
             ontology=ontology,
             stability_window=stability_window,
             reducer_version=reducer_version,
+            log_hash_scheme=log_hash_scheme,
         )
 
     def append(self, session_id: str, envelope: OperationEnvelope) -> None:
@@ -143,6 +158,7 @@ class InMemoryOpLogStore:
             stability_window=log.stability_window,
             reducer_version=log.reducer_version,
             envelopes=tuple(log.envelopes),
+            log_hash_scheme=log.log_hash_scheme,
         )
 
     def session_ids(self) -> tuple[str, ...]:

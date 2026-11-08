@@ -9,6 +9,7 @@ from cmbs import (
     Session, Snapshot, ObligationEntry, ClosedObligation, OntologyBundle,
     OBLIGATION_GROSS, OBLIGATION_NET,
     OperationSpec, OperationEnvelope, AppendResult,
+    compute_log_hash, canonical_envelope_bytes, LOG_HASH_SCHEME, LOG_HASH_GENESIS,
     Reducer, MaskMeetTombstoneReducer, ReinstatingMaskReducer,
     register_reducer, reducer_for_version, registered_reducer_versions,
     compute_state_hash, compute_position_digest,
@@ -76,6 +77,10 @@ Two dedupe rules apply, with different meanings:
 - A repeated **`idempotency_key`** is a domain repeat: a new *rejected*
   envelope is appended so the attempt is auditable.
 
+Every appended envelope gets a chained `log_hash`; see
+[`compute_log_hash`](#compute_log_hash). `AppendResult.state_hash_after`
+is unchanged: the state hash stays on the snapshot.
+
 ### Read access
 
 | Property / method                    | Type                              | Description                                                        |
@@ -89,6 +94,8 @@ Two dedupe rules apply, with different meanings:
 | `obligation_progress(obligation_id)` | `int \| None`                     | Progress of an open obligation under its declared semantics        |
 | `is_terminated`                      | `bool`                            | Whether `request_termination` has succeeded                        |
 | `head_seq`                           | `int`                             | Seq of the last envelope (0 if empty)                              |
+| `head_log_hash`                      | `str \| None`                     | `log_hash` of the last envelope, the link the next append chains from; `None` if the log is empty or ends in a legacy envelope |
+| `unverified_prefix`                  | `int`                             | Leading legacy envelopes (`log_hash is None`) that `recover` accepted without chain verification; `0` otherwise |
 | `position_digest`                    | `str`                             | Session-independent identity of the survivor set; see [`compute_position_digest`](#compute_position_digest) |
 | `initial_hypotheses`                 | `frozenset[str]`                  | The universe the session was created with                          |
 | `ontology`, `stability_window`, `reducer` |                              | Construction parameters, read back                                 |
@@ -119,6 +126,15 @@ keep enforcing a budget after recovery, pass the budgeted reducer:
 ```python
 recovered = Session.recover(store, session_id, reducer=ReinstatingMaskReducer(max_reinstates=3))
 ```
+
+Before replaying, `recover` verifies the envelope hash chain: every
+`log_hash` is recomputed from the envelope's canonical bytes and the previous
+link, and a mismatch raises `ValueError` naming the seq. A leading run of
+legacy envelopes with `log_hash = None` is accepted unverified and counted in
+`unverified_prefix`; verification starts at the first hashed envelope, which
+must chain from `LOG_HASH_GENESIS`. A missing hash after a hashed envelope
+is a broken chain and raises too, as does a `RecoveredSession.log_hash_scheme`
+the kernel does not implement.
 
 ## Snapshot
 
@@ -210,6 +226,7 @@ class OperationEnvelope:    # what the kernel persists
     accepted: bool
     rejected_reason: str | None
     created_at: float
+    log_hash: str | None = None   # chained hash; None on legacy or hand-built envelopes
 
 @dataclass(frozen=True)
 class AppendResult:
@@ -218,7 +235,9 @@ class AppendResult:
     survivors_count_after: int
 ```
 
-`OperationEnvelope.to_dict()` gives a JSON-serializable form.
+`OperationEnvelope.to_dict()` gives a JSON-serializable form, `log_hash`
+included; `OperationEnvelope(**d)` reverses it, and a dict persisted before
+the field existed loads with `log_hash=None`.
 
 ### Op types understood by the shipped reducers
 
@@ -366,12 +385,47 @@ detecting a zero-information probe inside a loop, keying a policy cache or
 value table on the frontier, and naming the meet of two positions
 (`compute_position_digest(a.survivors & b.survivors)`).
 
+### `compute_log_hash`
+
+```python
+compute_log_hash(previous: str | None, envelope: OperationEnvelope) -> str
+canonical_envelope_bytes(envelope: OperationEnvelope) -> bytes
+LOG_HASH_SCHEME = "log_hash_v1"
+LOG_HASH_GENESIS = "cmbs:log_hash_v1:genesis"
+```
+
+The per-envelope chain, scheme `log_hash_v1`:
+
+```
+log_hash_n = sha256(log_hash_{n-1} || canonical(envelope_n))
+log_hash_0 = LOG_HASH_GENESIS          # the link before the first envelope
+```
+
+`canonical(envelope)` is every `OperationEnvelope` field except `log_hash`
+(`op_id`, `seq`, `op_type`, `payload`, `source_id`, `idempotency_key`,
+`accepted`, `rejected_reason`, `created_at`) as JSON with sorted keys,
+compact separators and `ensure_ascii=False`, UTF-8 encoded. Inside
+`payload`, dict keys are stringified and sorted, sets become sorted lists and
+tuples become lists; floats use Python's shortest round-trip `repr`. A
+payload JSON cannot represent raises `TypeError` at append.
+
+`Session.append` computes the hash (the reducer never builds envelopes) and
+`Session.recover` verifies it. `created_at` is wall-clock at append but is
+stored on the record, so recomputing the chain from persisted envelopes
+reproduces it exactly. Where `state_hash` covers only what the reducer
+projects (a `provenance` edit leaves it unchanged) and does not chain,
+`log_hash` covers every stored byte of every envelope and each link covers
+the one before, so editing any field of envelope *n* changes hashes *n*
+through the head. The scheme identifier is stored with the session by
+`OpLogStore.create_session` and returned as `RecoveredSession.log_hash_scheme`.
+
 ## OpLogStore SPI
 
 ```python
 @runtime_checkable
 class OpLogStore(Protocol):
-    def create_session(self, session_id, initial_hypotheses, ontology, stability_window, reducer_version) -> None: ...
+    def create_session(self, session_id, initial_hypotheses, ontology, stability_window, reducer_version,
+                       log_hash_scheme=LOG_HASH_SCHEME) -> None: ...
     def append(self, session_id, envelope) -> None: ...
     def read_ops(self, session_id, from_seq=None, to_seq=None) -> tuple[OperationEnvelope, ...]: ...
     def head_seq(self, session_id) -> int: ...
@@ -380,8 +434,18 @@ class OpLogStore(Protocol):
 
 `create_session` raises if the ID exists. `read_ops` bounds are inclusive and
 1-indexed. `recover` returns a `RecoveredSession` with `session_id`,
-`initial_hypotheses`, `ontology`, `stability_window`, `reducer_version`, and
-`envelopes`.
+`initial_hypotheses`, `ontology`, `stability_window`, `reducer_version`,
+`envelopes`, and `log_hash_scheme` (default `LOG_HASH_SCHEME`).
+
+`log_hash_scheme` names the envelope-hash scheme the session writes under; a
+store should record it with the session and return it from `recover`. Stores
+written against the original five-argument `create_session` keep working:
+the kernel passes the keyword only to stores whose `create_session` accepts
+it, and a `RecoveredSession` built without the field reports the current
+scheme. Envelopes reach a store with `log_hash` already set, and
+`to_dict()` carries it, so a store that serializes envelopes that way (as the
+[file-backed tutorial store](../tutorials/06-file-backed-store.md) does) is
+chain-verified on recovery with no change.
 
 `InMemoryOpLogStore` is the shipped implementation. It verifies that
 envelopes arrive in contiguous seq order and raises `ValueError` otherwise;

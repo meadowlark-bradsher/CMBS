@@ -95,6 +95,24 @@ the old surface is removed outright rather than deprecated.
   populated, so v1 hashes are still byte-identical.
 - `tests/test_view_and_budget.py`: the namespaced invariants INV-B1–B4,
   INV-V1–V2, and INV-W1.
+- A chained per-envelope `log_hash` (scheme `"log_hash_v1"`):
+  `OperationEnvelope.log_hash`, computed by `Session.append` as
+  `sha256(previous_log_hash || canonical(envelope))` over every envelope
+  field except the hash itself, from the fixed genesis link
+  `LOG_HASH_GENESIS`. `compute_log_hash`, `canonical_envelope_bytes`,
+  `LOG_HASH_SCHEME` and `LOG_HASH_GENESIS` are exported. `Session.recover`
+  recomputes the chain and raises `ValueError` on any mismatch; a leading
+  run of legacy envelopes with `log_hash = None` loads and is reported via
+  `Session.unverified_prefix`. `Session.head_log_hash` exposes the current
+  link. `OpLogStore.create_session` takes `log_hash_scheme` (defaulted) and
+  `RecoveredSession.log_hash_scheme` returns it; stores written against the
+  five-argument signature keep working. `state_hash` is unchanged and stays
+  on the snapshot and `AppendResult`.
+- `tests/test_log_hash.py`: INV-H1 (tamper evidence: any single-field edit
+  moves that hash and every later one, and recovery refuses the log) and
+  INV-H2 (replay determinism: the chain recomputes from stored envelopes,
+  `created_at` included, and is independent of `state_hash`), plus legacy
+  loading and `to_dict` round-trips.
 - `tests/test_reinstate.py`: the namespaced invariants INV-R1–R4 and
   INV-O1–O2, a pinned v1 hash, recovery through the registry, and a
   seeded random-sequence property test. INV-5a's monotonicity test now
