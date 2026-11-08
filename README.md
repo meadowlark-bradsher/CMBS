@@ -92,6 +92,10 @@ adapter.submit_elimination_event(
 
 ## Docs
 
+**Read the rendered site at <https://meadowlark-bradsher.github.io/CMBS/>.** It is
+built with mkdocs and deployed from `main` by
+`.github/workflows/deploy-pages.yml`. The sources:
+
 - [Home](docs/index.md) — install, quickstart, and pointers
 - [Use Cases](docs/use-cases.md) — LLM context management and other applications
 - [Architecture](docs/architecture.md) — mechanism vs policy, invariants, layers
@@ -99,6 +103,3 @@ adapter.submit_elimination_event(
 - [API Reference](docs/reference/api.md) — public surface
 - [Repository Layout](docs/reference/repository.md) — what lives where
 - [Invariant Test Matrix](docs/reference/invariant-test-matrix.md) — what's tested
-
-Published at <https://meadowlark-bradsher.github.io/CMBS/> via mkdocs (CI in
-`.github/workflows/deploy-pages.yml`).
