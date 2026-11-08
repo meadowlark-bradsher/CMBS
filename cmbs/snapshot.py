@@ -12,9 +12,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+from .operations import OperationEnvelope
 
 
 def compute_position_digest(survivors: Iterable[str]) -> str:
@@ -115,7 +117,7 @@ class Snapshot:
     so that a reducer can gate ``request_termination`` (INV-2) from the
     snapshot alone.
 
-    The last four fields are populated only by reducers that support
+    The remaining fields are populated only by reducers that support
     reinstatement and stay empty under ``MaskMeetTombstoneReducer``:
 
     - ``asserted_pairs``: every ``(seq, hypothesis)`` an accepted
@@ -127,6 +129,12 @@ class Snapshot:
     - ``key_seqs``: idempotency key to the seq of the accepted envelope
       that consumed it, so a probe can be reinstated by ``probe_id``.
     - ``closed_obligations``: frozen records of successful exits.
+    - ``weights``: seq of an accepted elimination envelope to the
+      ``weight`` its payload carried, recorded only when one was given.
+      The kernel never reads a weight; a reinstatement budget's
+      ``retractable`` predicate may.
+    - ``reinstate_count``: the number of accepted ``reinstate`` envelopes
+      folded in so far, against which a reinstatement budget is checked.
     """
 
     session_id: str
@@ -144,6 +152,8 @@ class Snapshot:
     reinstated_pairs: frozenset[tuple[int, str]] = frozenset()
     key_seqs: dict[str, int] = field(default_factory=dict)
     closed_obligations: tuple[ClosedObligation, ...] = ()
+    weights: dict[int, float] = field(default_factory=dict)
+    reinstate_count: int = 0
 
     @property
     def n_survivors(self) -> int:
@@ -203,6 +213,75 @@ class Snapshot:
         not. Empty if that envelope was not an accepted elimination."""
         return frozenset(h for s, h in self.asserted_pairs if s == seq)
 
+    def view(
+        self,
+        k: int = 5,
+        recent: Sequence[OperationEnvelope] = (),
+    ) -> dict[str, Any]:
+        """A bounded, JSON-serializable summary for a model-facing caller.
+
+        Where :meth:`to_dict` lists every survivor and every recorded pair,
+        this view's size does not grow with the log: it carries counts,
+        the position digest, the open obligations with their declared
+        semantics and current progress, the closed-obligation records,
+        and the last ``k`` of ``recent`` reduced to ``seq``, ``op_type``,
+        ``accepted`` and ``rejected_reason``. The survivor list is
+        deliberately absent.
+
+        It is a pure function of this snapshot and ``recent``; the
+        snapshot holds no envelopes, so the caller supplies them.
+        ``Session.view`` reads the last ``k`` from the store and calls
+        this. Passing more than ``k`` envelopes is allowed and only the
+        last ``k`` are used.
+        """
+        if isinstance(k, bool) or not isinstance(k, int):
+            raise TypeError("k must be an int")
+        if k < 0:
+            raise ValueError("k must be >= 0")
+        tail = list(recent)[-k:] if k else []
+        return {
+            "session_id": self.session_id,
+            "seq": self.seq,
+            "state_hash": self.state_hash,
+            "position_digest": self.position_digest,
+            "n_survivors": self.n_survivors,
+            "entropy": self.entropy,
+            "terminated": self.terminated,
+            "obligations": [
+                {
+                    "obligation_id": o.obligation_id,
+                    "semantics": o.semantics,
+                    "min_eliminations": o.min_eliminations,
+                    "progress": o.progress(self.eliminated),
+                }
+                for o in self.obligations
+            ],
+            "closed_obligations": [self._closed_dict(c) for c in self.closed_obligations],
+            "n_in_force_pairs": len(self.in_force_pairs),
+            "n_reinstated_pairs": len(self.reinstated_pairs),
+            "reinstate_count": self.reinstate_count,
+            "recent": [
+                {
+                    "seq": e.seq,
+                    "op_type": e.op_type,
+                    "accepted": e.accepted,
+                    "rejected_reason": e.rejected_reason,
+                }
+                for e in tail
+            ],
+        }
+
+    @staticmethod
+    def _closed_dict(c: ClosedObligation) -> dict[str, Any]:
+        return {
+            "obligation_id": c.obligation_id,
+            "open_seq": c.open_seq,
+            "exit_seq": c.exit_seq,
+            "semantics": c.semantics,
+            "min_eliminations": c.min_eliminations,
+            "progress_at_exit": c.progress_at_exit,
+        }
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
@@ -227,17 +306,7 @@ class Snapshot:
                 for o in self.obligations
             ],
             "active_obligations": sorted(self.active_obligations),
-            "closed_obligations": [
-                {
-                    "obligation_id": c.obligation_id,
-                    "open_seq": c.open_seq,
-                    "exit_seq": c.exit_seq,
-                    "semantics": c.semantics,
-                    "min_eliminations": c.min_eliminations,
-                    "progress_at_exit": c.progress_at_exit,
-                }
-                for c in self.closed_obligations
-            ],
+            "closed_obligations": [self._closed_dict(c) for c in self.closed_obligations],
             "conclusion_history": list(self.conclusion_history),
             "terminated": self.terminated,
             "attrs": dict(self.attrs),
@@ -245,6 +314,8 @@ class Snapshot:
             "asserted_pairs": sorted([s, h] for s, h in self.asserted_pairs),
             "reinstated_pairs": sorted([s, h] for s, h in self.reinstated_pairs),
             "key_seqs": dict(sorted(self.key_seqs.items())),
+            "weights": sorted([s, w] for s, w in self.weights.items()),
+            "reinstate_count": self.reinstate_count,
         }
 
 
