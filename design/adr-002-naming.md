@@ -91,6 +91,7 @@ Their function is subsumed elsewhere:
 ## Open / deferred
 
 - Whether to export `DefaultReducer` as an alias for `MaskMeetTombstoneReducer`. Decide based on v1 user feedback.
+- Naming irony, accepted: `MaskMeetTombstoneReducer` carries the v2 prototype's "tombstone" vocabulary but keeps no tombstone records, while the reducer that actually does, `ReinstatingMaskReducer` (`"v2_mask_reinstate"`), is named for the operation it adds. The v1 name and version string stay as they are because the string is a replay tag on persisted sessions.
 - Whether the legacy-replay adapter survives the unification with the same name (`LegacyReplayAdapter`) or gets a refresh. Likely keeps the name; deferred to the migration PR.
 
 ## Where this gets used

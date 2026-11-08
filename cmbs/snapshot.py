@@ -49,13 +49,57 @@ class OntologyBundle:
     causal_graph_version: str = "v0"
 
 
+OBLIGATION_GROSS = "gross"
+OBLIGATION_NET = "net"
+OBLIGATION_SEMANTICS = frozenset({OBLIGATION_GROSS, OBLIGATION_NET})
+
+
 @dataclass(frozen=True)
 class ObligationEntry:
-    """Internal snapshot record of one active obligation."""
+    """Internal snapshot record of one active obligation.
+
+    ``eliminations_in_scope`` is the running count of hypotheses newly
+    removed since the obligation opened; it is what ``gross`` semantics
+    measure. The remaining fields are populated only by reducers that
+    support reinstatement: ``open_seq`` is the seq of the accepted
+    ``enter_obligation``, ``semantics`` is ``"gross"`` or ``"net"``, and
+    ``dead_at_open`` is the eliminated set at that moment, against which
+    ``net`` progress is computed.
+    """
 
     obligation_id: str
     min_eliminations: int
     eliminations_in_scope: int
+    open_seq: int = 0
+    semantics: str = OBLIGATION_GROSS
+    dead_at_open: frozenset[str] = frozenset()
+
+    def progress(self, eliminated: frozenset[str]) -> int:
+        """Progress toward ``min_eliminations`` under this entry's semantics.
+
+        ``gross``: the in-scope count. ``net``: ``|eliminated \\ dead_at_open|``,
+        the hypotheses dead now that were live when the obligation opened.
+        """
+        if self.semantics == OBLIGATION_NET:
+            return len(eliminated - self.dead_at_open)
+        return self.eliminations_in_scope
+
+
+@dataclass(frozen=True)
+class ClosedObligation:
+    """Frozen record of an obligation that exited successfully.
+
+    Keyed by ``(obligation_id, open_seq)``: an obligation may be re-entered
+    after exit, so several closed records can share an ID. Rejected exit
+    attempts never produce one; they remain rejected envelopes in the log.
+    """
+
+    obligation_id: str
+    open_seq: int
+    exit_seq: int
+    semantics: str
+    min_eliminations: int
+    progress_at_exit: int
 
 
 @dataclass(frozen=True)
@@ -70,6 +114,19 @@ class Snapshot:
     ``stability_window`` is session configuration carried on the snapshot
     so that a reducer can gate ``request_termination`` (INV-2) from the
     snapshot alone.
+
+    The last four fields are populated only by reducers that support
+    reinstatement and stay empty under ``MaskMeetTombstoneReducer``:
+
+    - ``asserted_pairs``: every ``(seq, hypothesis)`` an accepted
+      elimination envelope asserted dead, whether or not the hypothesis
+      was still a survivor at the time.
+    - ``reinstated_pairs``: the subset of ``asserted_pairs`` voided by an
+      accepted ``reinstate``. A hypothesis is eliminated iff it has at
+      least one asserted pair not in this set.
+    - ``key_seqs``: idempotency key to the seq of the accepted envelope
+      that consumed it, so a probe can be reinstated by ``probe_id``.
+    - ``closed_obligations``: frozen records of successful exits.
     """
 
     session_id: str
@@ -83,6 +140,10 @@ class Snapshot:
     terminated: bool
     attrs: dict[str, Any] = field(default_factory=dict)
     stability_window: int = 0
+    asserted_pairs: frozenset[tuple[int, str]] = frozenset()
+    reinstated_pairs: frozenset[tuple[int, str]] = frozenset()
+    key_seqs: dict[str, int] = field(default_factory=dict)
+    closed_obligations: tuple[ClosedObligation, ...] = ()
 
     @property
     def n_survivors(self) -> int:
@@ -111,11 +172,36 @@ class Snapshot:
         return compute_position_digest(self.survivors)
 
     def obligation(self, obligation_id: str) -> ObligationEntry | None:
-        """Return the active obligation with this ID, or ``None``."""
+        """Return the active obligation with this ID, or ``None``.
+
+        Closed records are not searched; see ``closed_obligations``.
+        """
         for entry in self.obligations:
             if entry.obligation_id == obligation_id:
                 return entry
         return None
+
+    def obligation_progress(self, obligation_id: str) -> int | None:
+        """Progress of the active obligation under its own semantics, or
+        ``None`` if no obligation with that ID is open."""
+        entry = self.obligation(obligation_id)
+        return None if entry is None else entry.progress(self.eliminated)
+
+    @property
+    def in_force_pairs(self) -> frozenset[tuple[int, str]]:
+        """Asserted pairs not yet reinstated."""
+        return self.asserted_pairs - self.reinstated_pairs
+
+    def killers(self, hypothesis_id: str) -> frozenset[int]:
+        """Seqs of the in-force elimination envelopes holding this
+        hypothesis dead. Empty for survivors, and always empty under a
+        reducer without reinstatement support."""
+        return frozenset(s for s, h in self.in_force_pairs if h == hypothesis_id)
+
+    def asserted_dead(self, seq: int) -> frozenset[str]:
+        """Hypotheses the envelope at ``seq`` asserted dead, reinstated or
+        not. Empty if that envelope was not an accepted elimination."""
+        return frozenset(h for s, h in self.asserted_pairs if s == seq)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -133,14 +219,32 @@ class Snapshot:
                     "obligation_id": o.obligation_id,
                     "min_eliminations": o.min_eliminations,
                     "eliminations_in_scope": o.eliminations_in_scope,
+                    "open_seq": o.open_seq,
+                    "semantics": o.semantics,
+                    "dead_at_open": sorted(o.dead_at_open),
+                    "progress": o.progress(self.eliminated),
                 }
                 for o in self.obligations
             ],
             "active_obligations": sorted(self.active_obligations),
+            "closed_obligations": [
+                {
+                    "obligation_id": c.obligation_id,
+                    "open_seq": c.open_seq,
+                    "exit_seq": c.exit_seq,
+                    "semantics": c.semantics,
+                    "min_eliminations": c.min_eliminations,
+                    "progress_at_exit": c.progress_at_exit,
+                }
+                for c in self.closed_obligations
+            ],
             "conclusion_history": list(self.conclusion_history),
             "terminated": self.terminated,
             "attrs": dict(self.attrs),
             "stability_window": self.stability_window,
+            "asserted_pairs": sorted([s, h] for s, h in self.asserted_pairs),
+            "reinstated_pairs": sorted([s, h] for s, h in self.reinstated_pairs),
+            "key_seqs": dict(sorted(self.key_seqs.items())),
         }
 
 
@@ -158,6 +262,21 @@ class ProbeResult:
     error: str | None = None
     eliminated: frozenset[str] = frozenset()
     already_eliminated: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class ReinstateResult:
+    """Outcome of ``Session.reinstate`` / ``Session.reinstate_probe``.
+
+    ``voided`` is the set of hypotheses whose elimination by the target
+    envelope was voided; ``revived`` is the subset that returned to the
+    survivor set because no other in-force elimination still held it.
+    """
+
+    accepted: bool
+    error: str | None = None
+    voided: frozenset[str] = frozenset()
+    revived: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

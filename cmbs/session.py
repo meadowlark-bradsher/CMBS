@@ -21,11 +21,13 @@ import uuid
 from collections.abc import Iterable
 
 from .operations import AppendResult, OperationEnvelope, OperationSpec
-from .reducer import MaskMeetTombstoneReducer, Reducer
+from .reducer import KIND_REINSTATEMENT, MaskMeetTombstoneReducer, Reducer, reducer_for_version
 from .snapshot import (
+    ClosedObligation,
     ObligationExitResult,
     OntologyBundle,
     ProbeResult,
+    ReinstateResult,
     Snapshot,
     TerminationResult,
 )
@@ -161,6 +163,7 @@ class Session:
         obligation_id: str,
         min_eliminations: int = 1,
         *,
+        semantics: str | None = None,
         source_id: str = "",
     ) -> AppendResult:
         """Open an obligation requiring at least ``min_eliminations``
@@ -168,16 +171,24 @@ class Session:
         Adapter-initiated; the kernel never opens obligations
         automatically.
 
+        ``semantics`` is ``"gross"`` or ``"net"`` and is only meaningful
+        under a reinstatement-aware reducer, where ``"net"`` is the default;
+        ``MaskMeetTombstoneReducer`` ignores it. It is omitted from the
+        payload when not given, so v1 envelopes are unchanged.
+
         Returns the append result so the caller can see whether the entry
         was accepted (it is rejected if ``obligation_id`` is already open).
         """
+        payload: dict = {
+            "obligation_id": obligation_id,
+            "min_eliminations": min_eliminations,
+        }
+        if semantics is not None:
+            payload["semantics"] = semantics
         return self.append(
             OperationSpec(
                 op_type="enter_obligation",
-                payload={
-                    "obligation_id": obligation_id,
-                    "min_eliminations": min_eliminations,
-                },
+                payload=payload,
                 source_id=source_id,
             )
         )
@@ -239,6 +250,73 @@ class Session:
         return TerminationResult(
             permitted=result.envelope.accepted,
             error=result.envelope.rejected_reason,
+        )
+
+    def reinstate(
+        self,
+        seq: int,
+        hypotheses: Iterable[str] | None = None,
+        *,
+        reason: str | None = None,
+        source_id: str = "",
+    ) -> ReinstateResult:
+        """Void the eliminations made by the envelope at ``seq``.
+
+        Translates to an envelope of ``op_type="reinstate"``. With
+        ``hypotheses`` given, only those are voided; they must all have
+        been asserted dead by that envelope and not already reinstated.
+        A hypothesis returns to the survivor set only if no other in-force
+        elimination still holds it. ``attrs`` and consumed probe IDs are
+        untouched.
+
+        Rejections are logged like any other, and reported in the result.
+        Raises ``NotImplementedError`` if the session's reducer does not
+        support reinstatement, since under such a reducer the op would be
+        accepted as a silent no-op.
+        """
+        payload: dict = {"seq": seq}
+        if hypotheses is not None:
+            payload["hypotheses"] = sorted(hypotheses)
+        if reason is not None:
+            payload["reason"] = reason
+        return self._reinstate(payload, source_id)
+
+    def reinstate_probe(
+        self,
+        probe_id: str,
+        hypotheses: Iterable[str] | None = None,
+        *,
+        reason: str | None = None,
+        source_id: str = "",
+    ) -> ReinstateResult:
+        """Void the eliminations made by the probe that consumed
+        ``probe_id``. The probe ID stays consumed: re-submitting it is
+        still rejected (INV-3). Otherwise as :meth:`reinstate`.
+        """
+        if not isinstance(probe_id, str):
+            raise TypeError("probe_id must be a string")
+        payload: dict = {"probe_id": probe_id}
+        if hypotheses is not None:
+            payload["hypotheses"] = sorted(hypotheses)
+        if reason is not None:
+            payload["reason"] = reason
+        return self._reinstate(payload, source_id)
+
+    def _reinstate(self, payload: dict, source_id: str) -> ReinstateResult:
+        if self._reducer.classify("reinstate") != KIND_REINSTATEMENT:
+            raise NotImplementedError(
+                f"reducer {self._reducer.version!r} does not support reinstatement; "
+                "construct the session with reducer=ReinstatingMaskReducer()"
+            )
+        before = self._snapshot
+        result = self.append(OperationSpec(op_type="reinstate", payload=payload, source_id=source_id))
+        if not result.envelope.accepted:
+            return ReinstateResult(accepted=False, error=result.envelope.rejected_reason)
+        after = self._snapshot
+        return ReinstateResult(
+            accepted=True,
+            voided=frozenset(h for _, h in after.reinstated_pairs - before.reinstated_pairs),
+            revived=after.survivors - before.survivors,
         )
 
     # ------------------------------------------------------------------
@@ -355,6 +433,17 @@ class Session:
         return self._snapshot.active_obligations
 
     @property
+    def closed_obligations(self) -> tuple[ClosedObligation, ...]:
+        """Frozen records of successful obligation exits. Always empty
+        under ``MaskMeetTombstoneReducer``, which does not keep them."""
+        return self._snapshot.closed_obligations
+
+    def obligation_progress(self, obligation_id: str) -> int | None:
+        """Progress of an open obligation under its declared semantics,
+        or ``None`` if it is not open."""
+        return self._snapshot.obligation_progress(obligation_id)
+
+    @property
     def is_terminated(self) -> bool:
         """Whether ``request_termination`` has succeeded for this session."""
         return self._snapshot.terminated
@@ -396,12 +485,16 @@ class Session:
     ) -> Session:
         """Reconstitute a session from its persisted op log.
 
-        The store records which reducer version wrote the log; replaying
-        under a different version would silently change meaning, so a
-        mismatch raises ``ValueError``.
+        The store records which reducer version wrote the log. With no
+        ``reducer`` given, the registered reducer for that version is used
+        (``ValueError`` if none is registered). Replaying under a different
+        version would silently change meaning, so an explicit ``reducer``
+        whose version does not match raises ``ValueError``.
         """
         record = store.recover(session_id)
-        active: Reducer = reducer if reducer is not None else MaskMeetTombstoneReducer()
+        active: Reducer = (
+            reducer if reducer is not None else reducer_for_version(record.reducer_version)
+        )
         if active.version != record.reducer_version:
             raise ValueError(
                 f"Session {session_id!r} was written under reducer "

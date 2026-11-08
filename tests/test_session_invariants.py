@@ -10,8 +10,13 @@ import math
 
 import pytest
 
+from cmbs.reducer import MaskMeetTombstoneReducer, ReinstatingMaskReducer
 from cmbs.session import Session
 from cmbs.store import InMemoryOpLogStore
+
+# INV-5a's monotonicity is asserted under both shipped reducers: under the
+# reinstating one it holds across any segment with no accepted reinstate.
+REDUCERS = [MaskMeetTombstoneReducer, ReinstatingMaskReducer]
 
 # =============================================================================
 # 1. INVARIANT TESTS
@@ -112,8 +117,9 @@ class TestINV5aEntropyQuantification:
         assert session.entropy == pytest.approx(initial_entropy)
         assert session.entropy == pytest.approx(math.log2(3))
 
-    def test_inv5a_05_entropy_is_monotonically_non_increasing(self):
-        session = Session(hypothesis_ids={"H1", "H2", "H3", "H4", "H5"})
+    @pytest.mark.parametrize("reducer_cls", REDUCERS, ids=lambda c: c.version)
+    def test_inv5a_05_entropy_is_monotonically_non_increasing(self, reducer_cls):
+        session = Session(hypothesis_ids={"H1", "H2", "H3", "H4", "H5"}, reducer=reducer_cls())
         entropy_trace = [session.entropy]
 
         for i, h in enumerate(["H1", "H2", "H3", "H4"]):
@@ -124,6 +130,30 @@ class TestINV5aEntropyQuantification:
 
         for j in range(len(entropy_trace) - 1):
             assert entropy_trace[j + 1] <= entropy_trace[j]
+
+    def test_inv5a_06_only_a_reinstate_may_raise_entropy(self):
+        """The conditional form of INV-5a under the reinstating reducer:
+        entropy is non-increasing across every step that is not an
+        accepted reinstate, and a reinstate is the only step that raises it."""
+        session = Session(hypothesis_ids={"H1", "H2", "H3", "H4"}, reducer=ReinstatingMaskReducer())
+        trace = [session.entropy]
+        session.submit_probe_result(probe_id="P1", observable_id="O1", eliminated={"H1"})
+        trace.append(session.entropy)
+        session.submit_probe_result(probe_id="P2", observable_id="O2", eliminated={"H2"})
+        trace.append(session.entropy)
+        session.enter_obligation("O")
+        trace.append(session.entropy)
+        session.reinstate_probe("P1")
+        trace.append(session.entropy)
+        session.submit_probe_result(probe_id="P3", observable_id="O3", eliminated={"H3"})
+        trace.append(session.entropy)
+
+        kinds = [session.reducer.classify(op.op_type) for op in session.operations()]
+        for j, kind in enumerate(kinds):
+            if kind == "reinstatement":
+                assert trace[j + 1] > trace[j]
+            else:
+                assert trace[j + 1] <= trace[j]
 
 
 # -----------------------------------------------------------------------------
