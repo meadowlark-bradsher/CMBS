@@ -19,6 +19,8 @@ nav:
       - API: reference/api.md
       - Repository Layout: reference/repository.md
       - Invariant Test Matrix: reference/invariant-test-matrix.md
+  - Recaps:
+      - 2026-11-12 (v0.2.0 release week): recaps/2026-11-12-weekly-recap.md
 markdown_extensions:
   - toc:
       permalink: true
