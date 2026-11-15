@@ -51,6 +51,7 @@ of those live in adapters; the kernel only books the consequences.
 
 - [Use Cases](use-cases.md) — when CMBS fits, including LLM context management
 - [Architecture](architecture.md) — mechanism vs policy, invariants, the op log
+- [Capabilities and Decisions](capabilities-and-decisions.md) — the full inventory, with the reasons behind each choice
 - [Tutorials](tutorials/index.md) — runnable scripts, three of them driven by Claude
 - [API Reference](reference/api.md) — the public surface
 - [Repository Layout](reference/repository.md) — what lives where
