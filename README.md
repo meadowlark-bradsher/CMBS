@@ -99,6 +99,7 @@ built with mkdocs and deployed from `main` by
 - [Home](docs/index.md) — install, quickstart, and pointers
 - [Use Cases](docs/use-cases.md) — LLM context management and other applications
 - [Architecture](docs/architecture.md) — mechanism vs policy, invariants, layers
+- [Capabilities and Decisions](docs/capabilities-and-decisions.md) — everything the kernel does, and the recorded reasons it does no more
 - [Tutorials](docs/tutorials/index.md) — six runnable scripts, three of them live against Claude
 - [API Reference](docs/reference/api.md) — public surface
 - [Repository Layout](docs/reference/repository.md) — what lives where
